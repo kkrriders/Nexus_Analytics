@@ -54,5 +54,14 @@ DROP POLICY IF EXISTS "Users can update own profile" ON public.users;
 CREATE POLICY "Users can update own profile" ON public.users
     FOR UPDATE USING (auth.uid() = id);
 
+-- Column-level grant: RLS above restricts which ROW a user can update (their
+-- own), but says nothing about which COLUMNS — without this, any signed-up
+-- user could PATCH their own `role` to 'admin' directly via Supabase's REST
+-- API using just the public anon key. Restrict self-service updates to
+-- full_name only; role/is_active must only ever change through the FastAPI
+-- admin endpoint, which uses the service_role key and bypasses RLS/grants.
+REVOKE UPDATE ON public.users FROM authenticated;
+GRANT UPDATE (full_name) ON public.users TO authenticated;
+
 -- Verify
 SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';

@@ -23,6 +23,7 @@ Data flow (ClickHouse NOT connected):
 import time
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 from models.schemas import (
     DashboardData, KPISet, KPIChanges, ProcessedCampaign,
@@ -45,6 +46,7 @@ from database.clickhouse_schema import (
     write_processed_metrics, write_kpi_snapshot, write_alerts,
     write_ai_recommendations, read_latest_recommendations,
     has_real_campaigns, read_real_campaigns, read_real_campaign_history,
+    MOCK_ACCOUNT_ID,
 )
 from ai.deepseek_client import enrich_recommendations, analyze_from_clickhouse
 from integrations.meta_ads import sync_if_stale
@@ -97,15 +99,16 @@ def _raw_from_row(row: dict | None) -> RawMetrics:
     )
 
 
-def _load_real_campaigns():
+def _load_real_campaigns(account_id: str):
     """
-    Load real ingested ad-account data from ClickHouse. Returns None when no
-    ad account has been connected/synced yet (caller should fall back to mock).
+    Load real ingested ad-account data from ClickHouse for one specific
+    account. Returns None when that account has no ad account connected/
+    synced yet (caller should fall back to mock).
     """
-    if not has_real_campaigns():
+    if not has_real_campaigns(account_id):
         return None
 
-    camp_rows = read_real_campaigns()
+    camp_rows = read_real_campaigns(account_id)
     if not camp_rows:
         return None
 
@@ -127,7 +130,7 @@ def _load_real_campaigns():
             target_audience=row["audience"],
         ))
 
-        daily_rows = read_real_campaign_history(cid)
+        daily_rows = read_real_campaign_history(account_id, cid)
         points = [_row_to_point(r) for r in daily_rows]
         history_map[cid] = points
 
@@ -179,15 +182,22 @@ def _aggregate_real_history(history_map: dict[str, list[dict]], days: int = 30) 
     return agg
 
 
-def run_pipeline() -> DashboardData:
+def run_pipeline(account_id: Optional[str] = None) -> DashboardData:
+    """
+    account_id identifies the requesting user's own connected ad account
+    (None if they haven't connected one). All real-data reads/writes and the
+    recommendation/KPI/alert cache are scoped to it so one user's connected
+    account is never visible to another user's request.
+    """
     window_seed = current_window_seed()
     ch_active = is_connected()
 
-    if ch_active:
-        sync_if_stale()
+    if ch_active and account_id:
+        sync_if_stale(account_id)
 
-    real = _load_real_campaigns() if ch_active else None
+    real = _load_real_campaigns(account_id) if (ch_active and account_id) else None
     using_real = real is not None
+    cache_key = account_id if using_real else MOCK_ACCOUNT_ID
 
     # ── 1. Generate / fetch raw metrics ──────────────────────────────────────
     campaigns_list = real["campaigns"] if using_real else BASE_CAMPAIGNS
@@ -285,14 +295,14 @@ def run_pipeline() -> DashboardData:
     raw_recs = generate_all_recommendations(processed)
 
     if ch_active:
-        write_processed_metrics(processed_campaigns, window_seed)
-        write_kpi_snapshot(kpis, window_seed)
-        write_alerts(alerts, window_seed)
+        write_processed_metrics(processed_campaigns, window_seed, cache_key)
+        write_kpi_snapshot(kpis, window_seed, cache_key)
+        write_alerts(alerts, window_seed, cache_key)
 
     # ── 7. Recommendations — ClickHouse cache → DeepSeek → fallback ─────────
     if ch_active:
         # Check ClickHouse cache first — avoid calling DeepSeek on every request
-        stored = read_latest_recommendations(window_seed)
+        stored = read_latest_recommendations(window_seed, cache_key)
         if stored:
             # Reuse recommendations already generated for this 5-minute window
             recommendations = [
@@ -316,8 +326,8 @@ def run_pipeline() -> DashboardData:
             # No cache for this window — read processed metrics from ClickHouse,
             # call DeepSeek to generate rich recommendations, then store them back.
             ch_metrics = ch_query(
-                "SELECT * FROM nexus.processed_metrics WHERE window_seed = {ws:UInt64}",
-                {"ws": window_seed},
+                "SELECT * FROM nexus.processed_metrics WHERE window_seed = {ws:UInt64} AND account_id = {aid:String}",
+                {"ws": window_seed, "aid": cache_key},
             )
             kpi_dict = {
                 "total_spend":     total_spend,
@@ -355,7 +365,7 @@ def run_pipeline() -> DashboardData:
                     except Exception as e:
                         logger.warning("Skipping malformed DeepSeek recommendation: %s", e)
                 # Write DeepSeek results back to ClickHouse for caching
-                write_ai_recommendations(recommendations, window_seed)
+                write_ai_recommendations(recommendations, window_seed, cache_key)
             else:
                 # DeepSeek unavailable — enrich rule-based descriptions and cache
                 enriched = enrich_recommendations(rule_rec_dicts)
@@ -363,7 +373,7 @@ def run_pipeline() -> DashboardData:
                     Recommendation(**{k: v for k, v in d.items() if k != "platform"})
                     for d in enriched
                 ]
-                write_ai_recommendations(recommendations, window_seed)
+                write_ai_recommendations(recommendations, window_seed, cache_key)
     else:
         # No ClickHouse — rule-based recommendations with DeepSeek description enrichment
         rec_dicts = [

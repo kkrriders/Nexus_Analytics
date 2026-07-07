@@ -91,22 +91,23 @@ def sync_account(account_id: str) -> dict:
     return {"status": "ok", "account_id": account_id, "campaigns_synced": written}
 
 
-def sync_if_stale() -> None:
+def sync_if_stale(account_id: str) -> None:
     """
-    Best-effort auto-refresh, called from the dashboard read path. Never
-    raises — a failed background sync should not break the dashboard, it
-    should just leave existing data in place for this request.
+    Best-effort auto-refresh for one specific account, called from the
+    dashboard read path once we know which account the requesting user owns.
+    Never raises — a failed background sync should not break the dashboard,
+    it should just leave existing data in place for this request.
     """
     try:
         rows = pg_query(
-            """SELECT id, last_synced_at FROM public.accounts
-               WHERE subscription_status = 'active' AND meta_ads->>'access_token' IS NOT NULL
-               ORDER BY updated_at DESC LIMIT 1"""
+            """SELECT last_synced_at FROM public.accounts
+               WHERE id = %(id)s AND subscription_status = 'active'
+                 AND meta_ads->>'access_token' IS NOT NULL""",
+            {"id": account_id},
         )
         if not rows:
             return
 
-        account_id = rows[0]["id"]
         last_synced_at = rows[0]["last_synced_at"]
         if last_synced_at is not None:
             age = datetime.now(timezone.utc) - last_synced_at
@@ -115,4 +116,4 @@ def sync_if_stale() -> None:
 
         sync_account(account_id)
     except Exception as e:
-        logger.warning("Background Meta sync skipped: %s", e)
+        logger.warning("Background Meta sync skipped for account %s: %s", account_id, e)
