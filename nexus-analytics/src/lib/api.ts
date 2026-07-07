@@ -1,4 +1,4 @@
-const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL ?? 'http://localhost:8000';
+const ENGINE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 async function fetchJSON(path: string) {
   const res = await fetch(`${ENGINE_URL}${path}`, { cache: 'no-store' });
