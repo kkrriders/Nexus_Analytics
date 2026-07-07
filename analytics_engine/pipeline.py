@@ -47,6 +47,7 @@ from database.clickhouse_schema import (
     has_real_campaigns, read_real_campaigns, read_real_campaign_history,
 )
 from ai.deepseek_client import enrich_recommendations, analyze_from_clickhouse
+from integrations.meta_ads import sync_if_stale
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,9 @@ def _aggregate_real_history(history_map: dict[str, list[dict]], days: int = 30) 
 def run_pipeline() -> DashboardData:
     window_seed = current_window_seed()
     ch_active = is_connected()
+
+    if ch_active:
+        sync_if_stale()
 
     real = _load_real_campaigns() if ch_active else None
     using_real = real is not None

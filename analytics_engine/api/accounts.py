@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from auth import get_current_user
 from database.postgres_client import query as pg_query, execute as pg_execute
 from database.clickhouse_schema import write_ingested_campaigns
+from integrations.meta_ads import sync_account
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -90,6 +91,23 @@ async def get_my_account(user: dict = Depends(get_current_user)):
         {"uid": user["id"]},
     )
     return rows[0] if rows else None
+
+
+@router.post("/accounts/sync")
+async def sync_my_account(user: dict = Depends(get_current_user)):
+    """
+    Manual 'Sync Now' — fetches fresh Meta ad data directly (no n8n involved)
+    so the dashboard doesn't depend on any external service being up.
+    """
+    rows = pg_query("SELECT id FROM public.accounts WHERE user_id = %(uid)s", {"uid": user["id"]})
+    if not rows:
+        raise HTTPException(status_code=404, detail="No connected account for this user")
+    try:
+        return sync_account(rows[0]["id"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=f"Meta sync failed: {e}")
 
 
 # ── n8n-facing ────────────────────────────────────────────────────────────
