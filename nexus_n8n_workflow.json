@@ -20,7 +20,7 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "X-N8N-Secret", "value": "={{ $env.NEXUS_N8N_SECRET }}" }
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_SHARED_SECRET }}" }
           ]
         },
         "options": {}
@@ -122,7 +122,7 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "X-N8N-Secret", "value": "={{ $env.NEXUS_N8N_SECRET }}" }
+            { "name": "X-N8N-Secret", "value": "={{ $env.N8N_SHARED_SECRET }}" }
           ]
         },
         "sendBody": true,
