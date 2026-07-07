@@ -41,6 +41,11 @@ app.include_router(router, prefix="/api")
 app.include_router(accounts_router, prefix="/api")
 
 
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
+
 @app.on_event("startup")
 async def startup():
     get_client()     # Attempt ClickHouse connection; logs result

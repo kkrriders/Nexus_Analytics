@@ -27,6 +27,7 @@ ENV N8N_PORT=5678 \
     N8N_PATH=/n8n/ \
     N8N_PROTOCOL=https \
     N8N_EDITOR_BASE_URL=/n8n/ \
+    N8N_PROXY_HOPS=1 \
     NODE_ENV=production \
     PORT=8080
 
