@@ -3,7 +3,7 @@ Mock data generator — produces realistic advertising data seeded by the curren
 5-minute time window. Data changes every 5 minutes to simulate live feeds.
 When ClickHouse is connected, this module is bypassed entirely.
 """
-import math
+import random
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List
@@ -24,8 +24,7 @@ def _hash_seed(*factors) -> int:
 
 def _seeded_rand(seed: int) -> float:
     """Deterministic float in [0, 1) from an integer seed."""
-    x = math.sin(seed + 1) * 10000
-    return x - math.floor(x)
+    return random.Random(seed).random()
 
 
 def _vary(base: float, max_pct: float, seed: int) -> float:

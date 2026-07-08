@@ -7,6 +7,7 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { KpiCard } from "@/components/ui/KpiCard";
 import { Icon } from "@/components/ui/Icon";
 import { fetchAdminUsers, fetchAdminIntegrations, fetchAdminNotifications } from "@/lib/api";
+import { timeAgo } from "@/lib/format";
 
 const QUICK_LINKS = [
   { href: "/users", icon: "manage_accounts", title: "User Management", desc: "Roles, invitations and workspace access." },
@@ -19,16 +20,6 @@ const LEVEL_TONE: Record<string, string> = {
   warning: "bg-tertiary-container/20 text-tertiary",
   info: "bg-secondary-container/15 text-secondary",
 };
-
-function timeAgo(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins} min ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
 
 export default function AdminOverviewPage() {
   const [users, setUsers] = useState<any[]>([]);

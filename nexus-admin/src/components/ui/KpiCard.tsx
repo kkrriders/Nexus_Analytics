@@ -20,22 +20,9 @@ type KpiCardProps = {
   direction: "up" | "down" | "flat";
   icon: string;
   accent?: AccentColor;
-  sparkline?: number[];
 };
 
-function Sparkline({ data, color }: { data: number[]; color: string }) {
-  const max = Math.max(...data), min = Math.min(...data);
-  const range = max - min || 1;
-  const w = 72, h = 28;
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * (h - 4)}`).join(" ");
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="overflow-visible">
-      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-export function KpiCard({ label, value, change, direction, icon, accent = "indigo", sparkline }: KpiCardProps) {
+export function KpiCard({ label, value, change, direction, icon, accent = "indigo" }: KpiCardProps) {
   const a = ACCENT[accent];
   const isUp = direction === "up", isDown = direction === "down";
   const changeColor = isUp ? "text-[#10B981]" : isDown ? "text-[#EF4444]" : "text-on-surface-variant";
@@ -61,13 +48,6 @@ export function KpiCard({ label, value, change, direction, icon, accent = "indig
           {value}
         </div>
         <div className="text-[13px] font-medium text-on-surface-variant mb-4">{label}</div>
-
-        {/* Sparkline */}
-        {sparkline && (
-          <div className="flex items-end justify-end">
-            <Sparkline data={sparkline} color={a.bar} />
-          </div>
-        )}
       </div>
     </div>
   );

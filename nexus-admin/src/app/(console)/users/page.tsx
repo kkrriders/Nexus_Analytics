@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
 import { createClient } from "@/lib/supabase/client";
+import { fetchAdminUsers } from "@/lib/api";
+import { timeAgo } from "@/lib/format";
 
 type ApiUser = {
   id: string;
@@ -21,18 +23,6 @@ type ApiUser = {
 };
 
 type RoleFilter = "all" | "admin" | "member";
-
-function timeAgo(iso: string | null): string {
-  if (!iso) return "Never";
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
 
 function initialsOf(name: string | null, email: string): string {
   if (name && name.trim()) {
@@ -67,21 +57,10 @@ function AdminUsersPageInner() {
     setError(null);
     const supabase = createClient();
     const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
     setCurrentUserId(sessionData.session?.user.id ?? null);
 
-    if (!token) {
-      setError("No active session.");
-      setLoading(false);
-      return;
-    }
-
     try {
-      const res = await fetch(`${apiUrl}/api/admin/users`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error(`Request failed (${res.status})`);
-      setUsers(await res.json());
+      setUsers(await fetchAdminUsers());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load users.");
     } finally {

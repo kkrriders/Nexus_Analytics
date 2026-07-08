@@ -1,7 +1,7 @@
 import { clsx } from "@/lib/clsx";
 import { Icon } from "./Icon";
 
-type ButtonVariant = "primary" | "secondary" | "success" | "danger" | "ghost" | "ai";
+type ButtonVariant = "primary" | "secondary";
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
@@ -12,10 +12,6 @@ type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:   "bg-primary text-white hover:bg-[#4338CA] shadow-sm",
   secondary: "bg-surface-bright border border-outline-variant text-on-surface hover:bg-surface-container-low shadow-sm",
-  success:   "bg-tertiary text-white hover:bg-[#059669] shadow-sm",
-  danger:    "bg-error text-white hover:bg-[#DC2626] shadow-sm",
-  ghost:     "text-on-surface-variant hover:text-on-surface hover:bg-surface-container",
-  ai:        "bg-ai text-white hover:bg-[#6D28D9] shadow-sm",
 };
 
 const SIZES = {

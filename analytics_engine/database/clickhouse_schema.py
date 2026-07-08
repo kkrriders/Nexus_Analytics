@@ -167,54 +167,6 @@ def create_tables() -> bool:
         return False
 
 
-# ─── Seed helpers (initial historical data) ───────────────────────────────────
-
-def is_seeded() -> bool:
-    try:
-        rows = ch_query("SELECT count() AS cnt FROM nexus.campaign_metrics_daily")
-        return bool(rows) and int(rows[0].get("cnt", 0)) > 0
-    except Exception:
-        return False
-
-
-def seed(campaigns, histories: dict) -> None:
-    """Write campaign metadata + 60-day daily history into ClickHouse."""
-    camp_rows = [
-        {
-            "account_id": MOCK_ACCOUNT_ID,
-            "id": c.id,
-            "name": c.name,
-            "platform": c.platform.value,
-            "status": c.status.value,
-            "budget": float(c.budget),
-            "start_date": c.start_date,
-            "audience": c.target_audience,
-        }
-        for c in campaigns
-    ]
-    insert("nexus.campaigns", camp_rows)
-
-    metric_rows = []
-    for cid, history in histories.items():
-        for pt in history:
-            metric_rows.append({
-                "account_id": MOCK_ACCOUNT_ID,
-                "campaign_id": cid,
-                "date": pt["date"],
-                "impressions": int(pt.get("impressions", 0)),
-                "clicks":      int(pt.get("clicks", 0)),
-                "spend":       float(pt.get("spend", 0)),
-                "revenue":     float(pt.get("revenue", 0)),
-                "conversions": int(pt.get("conversions", 0)),
-            })
-    if metric_rows:
-        insert("nexus.campaign_metrics_daily", metric_rows)
-    logger.info(
-        "ClickHouse seeded: %d campaigns, %d daily rows",
-        len(camp_rows), len(metric_rows),
-    )
-
-
 # ─── Pipeline write helpers ───────────────────────────────────────────────────
 
 def write_processed_metrics(processed_campaigns, window_seed: int, account_id: str = MOCK_ACCOUNT_ID) -> None:

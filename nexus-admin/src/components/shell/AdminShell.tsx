@@ -7,7 +7,7 @@ import { clsx } from "@/lib/clsx";
 import { Icon } from "@/components/ui/Icon";
 import { adminNav, type NavItem } from "@/lib/nav";
 import { createClient } from "@/lib/supabase/client";
-import { useTheme } from "@/lib/theme";
+import { STORAGE_KEY } from "@/lib/theme";
 import { NotificationBell } from "./NotificationBell";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -54,10 +54,24 @@ function AdminNavLink({
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { theme, toggleTheme } = useTheme();
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [account, setAccount] = useState<{ email: string; fullName: string | null } | null>(null);
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    const resolved = (document.documentElement.getAttribute("data-theme") as "light" | "dark" | null) ?? "light";
+    setTheme(resolved);
+  }, []);
+
+  const toggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === "dark" ? "light" : "dark";
+      window.localStorage.setItem(STORAGE_KEY, next);
+      document.documentElement.setAttribute("data-theme", next);
+      return next;
+    });
+  };
 
   useEffect(() => {
     const supabase = createClient();

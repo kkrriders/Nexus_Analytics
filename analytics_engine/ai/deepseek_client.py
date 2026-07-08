@@ -203,31 +203,3 @@ def analyze_from_clickhouse(processed_metrics: list[dict], kpi_snapshot: dict,
     except Exception as e:
         logger.warning("DeepSeek ClickHouse analysis failed: %s", e)
         return None
-
-
-def generate_campaign_summary(campaign_name: str, metrics: dict) -> str:
-    """Generate a 1-sentence AI summary for a campaign's current performance."""
-    client = get_client()
-    if client is None:
-        return ""
-
-    try:
-        prompt = (
-            f"Campaign: {campaign_name}\n"
-            f"ROAS: {metrics.get('roas', 0):.2f}x | "
-            f"CTR: {metrics.get('ctr', 0):.1f}% | "
-            f"CPA: ${metrics.get('cpa', 0):.0f} | "
-            f"Spend: ${metrics.get('spend', 0):.0f} | "
-            f"Revenue: ${metrics.get('revenue', 0):.0f}\n\n"
-            "Write a single sentence summarizing this campaign's performance and one key takeaway."
-        )
-        response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=100,
-            temperature=0.3,
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        logger.warning("DeepSeek campaign summary failed: %s", e)
-        return ""

@@ -11,19 +11,7 @@ import { clsx } from "@/lib/clsx";
 import { fetchDashboard, sendRecommendationAction } from "@/lib/api";
 import { useDashboardPrefs } from "@/lib/dashboardPrefs";
 import { exportToCsv } from "@/lib/csv";
-
-/* ─── helpers ─────────────────────────────────────────────────────────────── */
-function fmt(value: number, unit: string): string {
-  if (unit === "currency") {
-    if (value >= 1000000) return `₹${(value / 1000000).toFixed(1)}M`;
-    if (value >= 1000)    return `₹${(value / 1000).toFixed(1)}K`;
-    return `₹${value.toFixed(2)}`;
-  }
-  if (unit === "multiplier") return `${value.toFixed(2)}x`;
-  if (unit === "percent")   return `${value.toFixed(1)}%`;
-  if (unit === "number")    return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
-  return String(value);
-}
+import { fmt } from "@/lib/format";
 
 function HealthBar({ value, size = "md" }: { value: number; size?: "sm" | "md" }) {
   const color = value >= 80 ? "#10B981" : value >= 60 ? "#F59E0B" : "#EF4444";

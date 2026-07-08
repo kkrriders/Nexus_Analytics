@@ -12,15 +12,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _time_ago(minutes: int) -> str:
-    labels = {0: "just now", 1: "1 min ago", 5: "5 min ago", 30: "30 min ago",
-              60: "1 hr ago", 120: "2 hrs ago", 180: "3 hrs ago", 300: "5 hrs ago"}
-    for k in sorted(labels):
-        if minutes <= k:
-            return labels[k]
-    return f"{minutes // 60} hrs ago"
-
-
 def detect_alerts(
     campaign: Campaign,
     current: DerivedMetrics,

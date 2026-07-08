@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
 import { fetchAdminIntegrations, syncAllAdminIntegrations, syncAdminIntegration, disconnectAdminIntegration } from "@/lib/api";
+import { timeAgo } from "@/lib/format";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -28,17 +29,6 @@ const PLATFORM_META: Record<Platform, { label: string; initial: string; color: s
   google_ads: { label: "Google Ads", initial: "G", color: "text-primary" },
   meta_ads: { label: "Meta Ads", initial: "M", color: "text-[#0668E1]" },
 };
-
-function timeAgo(iso: string | null): string {
-  if (!iso) return "Never";
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
 
 export default function AdminIntegrationsPage() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);

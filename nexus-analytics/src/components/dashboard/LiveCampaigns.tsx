@@ -10,6 +10,7 @@ import { clsx } from "@/lib/clsx";
 import { fetchCampaigns } from "@/lib/api";
 import { PLATFORM_OPTIONS, useDashboardPrefs } from "@/lib/dashboardPrefs";
 import { exportToCsv } from "@/lib/csv";
+import { fmt } from "@/lib/format";
 
 type Status = "active" | "paused" | "review" | "draft";
 const ALL_STATUSES: Status[] = ["active", "paused", "review", "draft"];
@@ -30,18 +31,6 @@ const OPTIONAL_COLUMNS: { key: ColumnKey; label: string }[] = [
 
 function titleCase(s: string) {
   return s.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
-}
-
-function fmt(n: number, type: "currency" | "pct" | "x" | "number") {
-  if (type === "currency") {
-    if (n >= 1_000_000) return `₹${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000)     return `₹${(n / 1_000).toFixed(1)}K`;
-    return `₹${n.toFixed(2)}`;
-  }
-  if (type === "pct")    return `${n.toFixed(2)}%`;
-  if (type === "x")      return `${n.toFixed(2)}x`;
-  if (type === "number") return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
-  return String(n);
 }
 
 function LoadingState() {
