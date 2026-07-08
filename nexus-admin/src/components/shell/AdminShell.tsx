@@ -7,6 +7,8 @@ import { clsx } from "@/lib/clsx";
 import { Icon } from "@/components/ui/Icon";
 import { adminNav, type NavItem } from "@/lib/nav";
 import { createClient } from "@/lib/supabase/client";
+import { useTheme } from "@/lib/theme";
+import { NotificationBell } from "./NotificationBell";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -52,8 +54,10 @@ function AdminNavLink({
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { theme, toggleTheme } = useTheme();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [account, setAccount] = useState<{ email: string; fullName: string | null } | null>(null);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     const supabase = createClient();
@@ -69,6 +73,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     router.push("/login");
     router.refresh();
+  };
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = search.trim();
+    if (q) router.push(`/users?q=${encodeURIComponent(q)}`);
   };
 
   const sidebar = (
@@ -149,13 +159,23 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </span>
           </div>
           <div className="flex items-center gap-4">
-            <div className="relative hidden sm:block">
+            <form onSubmit={handleSearch} className="relative hidden sm:block">
               <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]" />
-              <input type="search" placeholder="Search admin…" className="pl-9 pr-4 py-1.5 bg-surface-container-lowest border border-outline-variant rounded-full text-body-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary w-56" />
-            </div>
-            <button className="p-1.5 rounded-full hover:bg-surface-container-high transition-colors text-on-surface-variant relative">
-              <Icon name="notifications" className="text-[20px]" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-error rounded-full border-2 border-surface" />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search users…"
+                className="pl-9 pr-4 py-1.5 bg-surface-container-lowest border border-outline-variant rounded-full text-body-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary w-56"
+              />
+            </form>
+            <NotificationBell />
+            <button
+              onClick={toggleTheme}
+              className="p-1.5 rounded-full hover:bg-surface-container-high transition-colors text-on-surface-variant"
+              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              <Icon name={theme === "dark" ? "light_mode" : "dark_mode"} className="text-[20px]" />
             </button>
           </div>
         </header>

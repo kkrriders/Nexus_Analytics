@@ -130,6 +130,7 @@ class Recommendation(BaseModel):
     cpa_impact: float
     confidence: float
     priority: str  # "high" | "medium" | "low"
+    status: Optional[str] = None  # "approved" | "rejected" | None (pending)
 
 
 class ProcessedCampaign(BaseModel):

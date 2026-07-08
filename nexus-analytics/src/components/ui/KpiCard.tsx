@@ -43,7 +43,7 @@ export function KpiCard({ label, value, change, direction, icon, accent = "indig
   const arrow      = isUp ? "arrow_upward"  : isDown ? "arrow_downward" : "remove";
 
   return (
-    <div className="bg-white border border-outline-variant rounded-[14px] elevation-card transition-all duration-200 overflow-hidden">
+    <div className="bg-surface-bright border border-outline-variant rounded-[14px] elevation-card transition-all duration-200 overflow-hidden">
       <div className="p-5">
         {/* Top row */}
         <div className="flex items-center justify-between mb-4">

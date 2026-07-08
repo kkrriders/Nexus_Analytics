@@ -20,6 +20,7 @@ from auth import get_current_user
 from database.postgres_client import query as pg_query, execute as pg_execute
 from database.clickhouse_schema import write_ingested_campaigns
 from integrations.meta_ads import sync_account
+from notifications import create_notification
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -107,6 +108,14 @@ async def sync_my_account(user: dict = Depends(get_current_user)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
+        create_notification(
+            user_id=user["id"], level="critical", title="Ad account sync failed",
+            body=str(e), link="/settings", dedup_key=f"sync_fail_{rows[0]['id']}",
+        )
+        create_notification(
+            user_id=None, audience="admin", level="warning", title=f"Sync failed for {user.get('email', 'a user')}",
+            body=str(e), link="/integrations", dedup_key=f"admin_sync_fail_{rows[0]['id']}",
+        )
         raise HTTPException(status_code=502, detail=f"Meta sync failed: {e}")
 
 
@@ -135,7 +144,8 @@ async def ingest_account_data(account_id: str, body: IngestBody):
     Persists the real campaign rows into ClickHouse so the dashboard pipeline
     can read live data instead of the mock demo pipeline.
     """
-    if not pg_query("SELECT id FROM public.accounts WHERE id = %(id)s", {"id": account_id}):
+    account_rows = pg_query("SELECT user_id FROM public.accounts WHERE id = %(id)s", {"id": account_id})
+    if not account_rows:
         raise HTTPException(status_code=404, detail="Account not found")
 
     google_ads = body.platforms.get("google_ads", {}) or {}
@@ -157,6 +167,16 @@ async def ingest_account_data(account_id: str, body: IngestBody):
     )
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to record sync")
+
+    if error:
+        create_notification(
+            user_id=account_rows[0]["user_id"], level="warning", title="Ad account sync failed",
+            body=error, link="/settings", dedup_key=f"ingest_fail_{account_id}",
+        )
+        create_notification(
+            user_id=None, audience="admin", level="warning", title="Ingestion sync failed",
+            body=error, link="/integrations", dedup_key=f"admin_ingest_fail_{account_id}",
+        )
     return {"status": "ok", "account_id": account_id}
 
 

@@ -7,6 +7,7 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
 import { fetchAudience } from "@/lib/api";
+import { exportToCsv } from "@/lib/csv";
 
 type Affinity = "high" | "med" | "low";
 
@@ -74,6 +75,10 @@ export default function LiveAudience() {
   const peakPct = ageBars.length > 0 ? Math.max(...ageBars.map((a: any) => a.pct)) : 0;
   const topDevice = devices[0];
 
+  const exportReport = () => exportToCsv("nexus-audience-report.csv", geoRows.map((g: any) => ({
+    country: g.country, pct: g.pct, reach_m: g.reach_m,
+  })));
+
   return (
     <>
       <PageHeader
@@ -81,7 +86,7 @@ export default function LiveAudience() {
         subtitle="Deep dive into demographic segments, device preferences, and overlap patterns."
         actions={
           <>
-            <Button icon="download">Export Report</Button>
+            <Button icon="download" onClick={exportReport}>Export Report</Button>
             <Button variant="primary" icon="refresh" onClick={load}>Refresh</Button>
           </>
         }

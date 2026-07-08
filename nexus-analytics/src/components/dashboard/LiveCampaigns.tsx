@@ -1,14 +1,18 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
 import { fetchCampaigns } from "@/lib/api";
+import { PLATFORM_OPTIONS, useDashboardPrefs } from "@/lib/dashboardPrefs";
+import { exportToCsv } from "@/lib/csv";
 
 type Status = "active" | "paused" | "review" | "draft";
+const ALL_STATUSES: Status[] = ["active", "paused", "review", "draft"];
 
 const STATUS_STYLES: Record<Status, string> = {
   active: "bg-tertiary-fixed-dim/20 text-tertiary",
@@ -17,7 +21,16 @@ const STATUS_STYLES: Record<Status, string> = {
   draft:  "bg-secondary-fixed/50 text-secondary",
 };
 
-const FILTERS = ["Platform", "Campaign", "Country", "Device"];
+type ColumnKey = "cpa" | "roas" | "health";
+const OPTIONAL_COLUMNS: { key: ColumnKey; label: string }[] = [
+  { key: "cpa", label: "CPA" },
+  { key: "roas", label: "ROAS" },
+  { key: "health", label: "Health Score" },
+];
+
+function titleCase(s: string) {
+  return s.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+}
 
 function fmt(n: number, type: "currency" | "pct" | "x" | "number") {
   if (type === "currency") {
@@ -51,26 +64,99 @@ function ErrorState({ msg, retry }: { msg: string; retry: () => void }) {
   );
 }
 
+function FilterDropdown({ label, open, onToggle, onClose, children }: {
+  label: string; open: boolean; onToggle: () => void; onClose: () => void; children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onClickAway = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); };
+    document.addEventListener("mousedown", onClickAway);
+    return () => document.removeEventListener("mousedown", onClickAway);
+  }, [open, onClose]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-outline-variant hover:border-primary transition-colors text-body-sm text-on-surface"
+      >
+        {label}
+        <Icon name="expand_more" className="text-[16px] text-outline" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-10 w-52 bg-surface-bright border border-outline-variant rounded-[10px] shadow-lg py-1.5 z-50 max-h-64 overflow-y-auto custom-scrollbar">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function LiveCampaigns() {
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <LiveCampaignsInner />
+    </Suspense>
+  );
+}
+
+function LiveCampaignsInner() {
+  const searchParams = useSearchParams();
+  const { days, activePlatforms, togglePlatform, clearPlatformFilter } = useDashboardPrefs();
+
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
-  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get("campaign"));
+  const [search, setSearch] = useState(searchParams.get("q") ?? "");
+  const [statusFilter, setStatusFilter] = useState<Set<Status>>(new Set());
+  const [audienceFilter, setAudienceFilter] = useState<Set<string>>(new Set());
+  const [visibleCols, setVisibleCols] = useState<Set<ColumnKey>>(new Set(["cpa", "roas", "health"]));
+  const [openFilter, setOpenFilter] = useState<"platform" | "status" | "audience" | "columns" | null>(null);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await fetchCampaigns();
+      const data = await fetchCampaigns(days);
       setCampaigns(data ?? []);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [days]);
 
   useEffect(() => { load(); }, [load]);
+
+  const audiences = useMemo(
+    () => Array.from(new Set(campaigns.map((c) => c.campaign?.target_audience).filter(Boolean))),
+    [campaigns],
+  );
+
+  const filtered = useMemo(() => campaigns.filter((c: any) => {
+    if (activePlatforms.size > 0 && !activePlatforms.has(c.campaign?.platform)) return false;
+    if (statusFilter.size > 0 && !statusFilter.has(c.campaign?.status)) return false;
+    if (audienceFilter.size > 0 && !audienceFilter.has(c.campaign?.target_audience)) return false;
+    if (search.trim() && !c.campaign?.name?.toLowerCase().includes(search.trim().toLowerCase())) return false;
+    return true;
+  }), [campaigns, activePlatforms, statusFilter, audienceFilter, search]);
+
+  const toggleSetValue = <T,>(set: Set<T>, value: T, setter: (s: Set<T>) => void) => {
+    const next = new Set(set);
+    if (next.has(value)) next.delete(value); else next.add(value);
+    setter(next);
+  };
+
+  const clearAllFilters = () => {
+    clearPlatformFilter();
+    setStatusFilter(new Set());
+    setAudienceFilter(new Set());
+    setSearch("");
+  };
+
+  const activeFilterCount = activePlatforms.size + statusFilter.size + audienceFilter.size + (search.trim() ? 1 : 0);
 
   if (loading) return <LoadingState />;
   if (error)   return <ErrorState msg={error} retry={load} />;
@@ -93,7 +179,18 @@ export default function LiveCampaigns() {
     { label: "Blended ROAS",     value: fmt(blendedROAS,"x"),        delta: "+1.2%",  dir: "up"   as const, icon: "monetization_on" },
   ];
 
-  const selected = campaigns[selectedIdx] ?? campaigns[0];
+  const selected = filtered.find((c) => c.campaign?.id === selectedId) ?? filtered[0];
+
+  const openInNewTab = () => {
+    if (!selected?.campaign?.id) return;
+    window.open(`/campaign-analytics?campaign=${encodeURIComponent(selected.campaign.id)}`, "_blank");
+  };
+
+  const exportCampaigns = () => exportToCsv("nexus-campaigns.csv", filtered.map((c: any) => ({
+    name: c.campaign?.name, platform: c.campaign?.platform, status: c.campaign?.status,
+    spend: c.metrics?.spend, revenue: c.metrics?.revenue, cpa: c.metrics?.cpa, roas: c.metrics?.roas,
+    conversions: c.metrics?.conversions, health_score: c.health?.score,
+  })));
 
   return (
     <>
@@ -102,7 +199,7 @@ export default function LiveCampaigns() {
         subtitle="Detailed performance metrics across all active channels."
         actions={
           <>
-            <Button icon="download" onClick={load}>Export</Button>
+            <Button icon="download" onClick={exportCampaigns}>Export</Button>
             <Button variant="primary" icon="refresh" onClick={load}>Refresh</Button>
           </>
         }
@@ -114,14 +211,42 @@ export default function LiveCampaigns() {
           <Icon name="filter_list" className="text-[16px]" />
           Filters
         </div>
-        {FILTERS.map((f) => (
-          <button key={f} className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-outline-variant hover:border-primary transition-colors text-body-sm text-on-surface">
-            {f}
-            <Icon name="expand_more" className="text-[16px] text-outline" />
-          </button>
-        ))}
+
+        <FilterDropdown label={`Platform${activePlatforms.size ? ` (${activePlatforms.size})` : ""}`}
+          open={openFilter === "platform"} onToggle={() => setOpenFilter(openFilter === "platform" ? null : "platform")} onClose={() => setOpenFilter(null)}>
+          {PLATFORM_OPTIONS.map((p) => (
+            <label key={p.value} className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-on-surface hover:bg-surface-container-low cursor-pointer">
+              <input type="checkbox" checked={activePlatforms.has(p.value)} onChange={() => togglePlatform(p.value)} className="accent-primary" />
+              {p.label}
+            </label>
+          ))}
+        </FilterDropdown>
+
+        <FilterDropdown label={`Status${statusFilter.size ? ` (${statusFilter.size})` : ""}`}
+          open={openFilter === "status"} onToggle={() => setOpenFilter(openFilter === "status" ? null : "status")} onClose={() => setOpenFilter(null)}>
+          {ALL_STATUSES.map((s) => (
+            <label key={s} className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-on-surface hover:bg-surface-container-low cursor-pointer capitalize">
+              <input type="checkbox" checked={statusFilter.has(s)} onChange={() => toggleSetValue(statusFilter, s, setStatusFilter)} className="accent-primary" />
+              {s}
+            </label>
+          ))}
+        </FilterDropdown>
+
+        <FilterDropdown label={`Audience${audienceFilter.size ? ` (${audienceFilter.size})` : ""}`}
+          open={openFilter === "audience"} onToggle={() => setOpenFilter(openFilter === "audience" ? null : "audience")} onClose={() => setOpenFilter(null)}>
+          {audiences.length === 0 && <p className="px-3 py-2 text-[12px] text-on-surface-variant">No audiences yet</p>}
+          {audiences.map((a: string) => (
+            <label key={a} className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-on-surface hover:bg-surface-container-low cursor-pointer">
+              <input type="checkbox" checked={audienceFilter.has(a)} onChange={() => toggleSetValue(audienceFilter, a, setAudienceFilter)} className="accent-primary" />
+              <span className="truncate">{a}</span>
+            </label>
+          ))}
+        </FilterDropdown>
+
         <div className="h-6 w-px bg-outline-variant mx-1" />
-        <button className="text-primary text-body-sm font-medium hover:underline px-2">Clear All</button>
+        <button onClick={clearAllFilters} disabled={activeFilterCount === 0} className="text-primary text-body-sm font-medium hover:underline px-2 disabled:opacity-40 disabled:no-underline">
+          Clear All
+        </button>
       </div>
 
       {/* KPI row */}
@@ -157,33 +282,52 @@ export default function LiveCampaigns() {
           <div className="p-4 border-b border-outline-variant flex items-center justify-between bg-surface-container-low/50">
             <div className="relative w-64">
               <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]" />
-              <input className="w-full h-8 pl-9 pr-3 bg-surface border border-outline-variant rounded-md text-body-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary text-on-surface placeholder:text-outline" placeholder="Search campaigns…" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full h-8 pl-9 pr-3 bg-surface border border-outline-variant rounded-md text-body-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary text-on-surface placeholder:text-outline"
+                placeholder="Search campaigns…"
+              />
             </div>
-            <button className="p-1.5 rounded border border-outline-variant bg-surface hover:bg-surface-container-low text-on-surface-variant">
-              <Icon name="view_column" className="text-[18px]" />
-            </button>
+            <FilterDropdown label="" open={openFilter === "columns"} onToggle={() => setOpenFilter(openFilter === "columns" ? null : "columns")} onClose={() => setOpenFilter(null)}>
+              <p className="px-3 py-1.5 text-[11px] font-semibold text-on-surface-variant uppercase tracking-wide">Columns</p>
+              {OPTIONAL_COLUMNS.map((col) => (
+                <label key={col.key} className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-on-surface hover:bg-surface-container-low cursor-pointer">
+                  <input type="checkbox" checked={visibleCols.has(col.key)} onChange={() => toggleSetValue(visibleCols, col.key, setVisibleCols)} className="accent-primary" />
+                  {col.label}
+                </label>
+              ))}
+            </FilterDropdown>
           </div>
 
           <div className="flex-1 overflow-auto custom-scrollbar">
             <table className="w-full text-left border-collapse min-w-[800px]">
               <thead className="sticky top-0 bg-surface-container-lowest border-b border-outline-variant shadow-sm z-10">
                 <tr>
-                  {["Campaign", "Platform", "Spend", "CPA", "ROAS", "Status", "Health Score"].map((h) => (
-                    <th key={h} className="px-4 py-3 text-label-caps text-on-surface-variant uppercase tracking-wider whitespace-nowrap">{h}</th>
-                  ))}
+                  <th className="px-4 py-3 text-label-caps text-on-surface-variant uppercase tracking-wider whitespace-nowrap">Campaign</th>
+                  <th className="px-4 py-3 text-label-caps text-on-surface-variant uppercase tracking-wider whitespace-nowrap">Platform</th>
+                  <th className="px-4 py-3 text-label-caps text-on-surface-variant uppercase tracking-wider whitespace-nowrap">Spend</th>
+                  {visibleCols.has("cpa") && <th className="px-4 py-3 text-label-caps text-on-surface-variant uppercase tracking-wider whitespace-nowrap">CPA</th>}
+                  {visibleCols.has("roas") && <th className="px-4 py-3 text-label-caps text-on-surface-variant uppercase tracking-wider whitespace-nowrap">ROAS</th>}
+                  <th className="px-4 py-3 text-label-caps text-on-surface-variant uppercase tracking-wider whitespace-nowrap">Status</th>
+                  {visibleCols.has("health") && <th className="px-4 py-3 text-label-caps text-on-surface-variant uppercase tracking-wider whitespace-nowrap">Health Score</th>}
                 </tr>
               </thead>
               <tbody className="text-body-sm divide-y divide-outline-variant/50">
-                {campaigns.map((c: any, i: number) => {
+                {filtered.length === 0 && (
+                  <tr><td colSpan={7} className="px-4 py-10 text-center text-on-surface-variant">No campaigns match the current filters.</td></tr>
+                )}
+                {filtered.map((c: any, i: number) => {
                   const m = c.metrics ?? {};
                   const status = (c.campaign?.status ?? "draft") as Status;
                   const health = c.health?.score ?? 0;
-                  const platform = (c.campaign?.platform ?? "").replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase());
+                  const platform = titleCase(c.campaign?.platform ?? "");
+                  const isSelected = (selected?.campaign?.id ?? filtered[0]?.campaign?.id) === c.campaign?.id;
                   return (
                     <tr key={c.campaign?.id ?? i}
-                      onClick={() => setSelectedIdx(i)}
+                      onClick={() => setSelectedId(c.campaign?.id ?? null)}
                       className={clsx("hover:bg-surface-container-low/50 transition-colors cursor-pointer",
-                        selectedIdx === i && "bg-primary-container/5",
+                        isSelected && "bg-primary-container/5",
                         status === "paused" && "opacity-75",
                       )}>
                       <td className="px-4 py-3 font-medium text-on-surface">{c.campaign?.name}</td>
@@ -191,35 +335,41 @@ export default function LiveCampaigns() {
                       <td className="px-4 py-3 text-right font-medium text-on-surface font-mono">
                         {m.spend > 0 ? fmt(m.spend, "currency") : "—"}
                       </td>
-                      <td className={clsx("px-4 py-3 text-right font-medium font-mono",
-                        m.cpa > 0 && m.cpa < 20 ? "text-tertiary" : m.cpa > 40 ? "text-error" : "text-on-surface"
-                      )}>
-                        {m.cpa > 0 ? fmt(m.cpa, "currency") : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-on-surface font-mono">
-                        {m.roas > 0 ? fmt(m.roas, "x") : "—"}
-                      </td>
+                      {visibleCols.has("cpa") && (
+                        <td className={clsx("px-4 py-3 text-right font-medium font-mono",
+                          m.cpa > 0 && m.cpa < 20 ? "text-tertiary" : m.cpa > 40 ? "text-error" : "text-on-surface"
+                        )}>
+                          {m.cpa > 0 ? fmt(m.cpa, "currency") : "—"}
+                        </td>
+                      )}
+                      {visibleCols.has("roas") && (
+                        <td className="px-4 py-3 text-right font-medium text-on-surface font-mono">
+                          {m.roas > 0 ? fmt(m.roas, "x") : "—"}
+                        </td>
+                      )}
                       <td className="px-4 py-3">
                         <span className={clsx("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide", STATUS_STYLES[status])}>
                           {status}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-full bg-surface-variant rounded-full h-1.5 max-w-[80px]">
-                            {health > 0 && (
-                              <div className={clsx("h-1.5 rounded-full",
-                                health >= 80 ? "bg-tertiary" : health >= 60 ? "bg-warning" : "bg-error"
-                              )} style={{ width: `${health}%` }} />
-                            )}
+                      {visibleCols.has("health") && (
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-full bg-surface-variant rounded-full h-1.5 max-w-[80px]">
+                              {health > 0 && (
+                                <div className={clsx("h-1.5 rounded-full",
+                                  health >= 80 ? "bg-tertiary" : health >= 60 ? "bg-warning" : "bg-error"
+                                )} style={{ width: `${health}%` }} />
+                              )}
+                            </div>
+                            <span className={clsx("text-label-caps min-w-[1.5rem]",
+                              health >= 80 ? "text-tertiary" : health < 50 ? "text-error" : "text-on-surface-variant"
+                            )}>
+                              {health > 0 ? Math.round(health) : "—"}
+                            </span>
                           </div>
-                          <span className={clsx("text-label-caps min-w-[1.5rem]",
-                            health >= 80 ? "text-tertiary" : health < 50 ? "text-error" : "text-on-surface-variant"
-                          )}>
-                            {health > 0 ? Math.round(health) : "—"}
-                          </span>
-                        </div>
-                      </td>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -228,7 +378,7 @@ export default function LiveCampaigns() {
           </div>
 
           <div className="p-3 border-t border-outline-variant flex items-center justify-between text-body-sm text-on-surface-variant">
-            <span>Showing {campaigns.length} campaigns · {active.length} active</span>
+            <span>Showing {filtered.length} of {campaigns.length} campaigns · {active.length} active</span>
           </div>
         </Card>
 
@@ -241,10 +391,10 @@ export default function LiveCampaigns() {
                   <div className="min-w-0">
                     <h3 className="text-headline-md text-on-surface font-semibold truncate">{selected.campaign?.name}</h3>
                     <p className="text-body-sm text-on-surface-variant mt-0.5">
-                      {(selected.campaign?.platform ?? "").replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())} · {selected.campaign?.target_audience}
+                      {titleCase(selected.campaign?.platform ?? "")} · {selected.campaign?.target_audience}
                     </p>
                   </div>
-                  <button className="text-primary hover:bg-primary/10 p-1.5 rounded-full transition-colors shrink-0 ml-2">
+                  <button onClick={openInNewTab} title="Open in new tab" className="text-primary hover:bg-primary/10 p-1.5 rounded-full transition-colors shrink-0 ml-2">
                     <Icon name="open_in_new" className="text-[20px]" />
                   </button>
                 </div>
@@ -281,7 +431,7 @@ export default function LiveCampaigns() {
 
                 {/* Sparkline mini area chart */}
                 <div className="flex flex-col gap-2">
-                  <p className="text-label-md font-semibold text-on-surface">Revenue Trend (30 Days)</p>
+                  <p className="text-label-md font-semibold text-on-surface">Revenue Trend ({days} Days)</p>
                   <div className="h-40 w-full bg-surface-container-low/30 rounded-lg border border-outline-variant/50 relative overflow-hidden">
                     {selected.sparkline?.length > 1 && (() => {
                       const pts: number[] = selected.sparkline;

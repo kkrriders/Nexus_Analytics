@@ -71,22 +71,22 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
       {/* Upgrade */}
       <div className="p-4 border-t border-outline-variant">
-        <button className="w-full bg-primary text-white text-[14px] font-semibold py-2.5 px-4 rounded-[10px] hover:bg-[#4338CA] transition-colors flex items-center justify-center gap-2 shadow-sm">
+        <Link href="/plans" onClick={onClose} className="w-full bg-primary text-white text-[14px] font-semibold py-2.5 px-4 rounded-[10px] hover:bg-[#4338CA] transition-colors flex items-center justify-center gap-2 shadow-sm">
           <Icon name="upgrade" className="text-[18px]" />
           Upgrade Plan
-        </button>
+        </Link>
       </div>
     </>
   );
 
   return (
     <>
-      <aside className="hidden md:flex flex-col w-[280px] h-screen fixed left-0 top-0 bg-white border-r border-outline-variant z-50">
+      <aside className="hidden md:flex flex-col w-[280px] h-screen fixed left-0 top-0 bg-surface-bright border-r border-outline-variant z-50">
         {content}
       </aside>
       <div className={clsx("md:hidden fixed inset-0 z-50 transition-opacity duration-200", open ? "opacity-100" : "pointer-events-none opacity-0")}>
         <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-        <aside className={clsx("absolute left-0 top-0 h-full w-[280px] bg-white border-r border-outline-variant flex flex-col transition-transform duration-200", open ? "translate-x-0" : "-translate-x-full")}>
+        <aside className={clsx("absolute left-0 top-0 h-full w-[280px] bg-surface-bright border-r border-outline-variant flex flex-col transition-transform duration-200", open ? "translate-x-0" : "-translate-x-full")}>
           {content}
         </aside>
       </div>

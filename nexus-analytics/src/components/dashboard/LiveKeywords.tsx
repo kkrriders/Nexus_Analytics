@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
 import { fetchKeywords } from "@/lib/api";
+import { exportToCsv } from "@/lib/csv";
 
 type Trend  = "up" | "flat" | "down";
 type Status = "active" | "paused";
@@ -36,6 +37,7 @@ export default function LiveKeywords() {
   const [data, setData]       = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
+  const [campaignFilter, setCampaignFilter] = useState("All Campaigns");
 
   const load = useCallback(async () => {
     try {
@@ -65,12 +67,18 @@ export default function LiveKeywords() {
     </div>
   );
 
-  const keywords: any[] = data?.keywords  ?? [];
+  const allKeywords: any[] = data?.keywords  ?? [];
+  const keywords = campaignFilter === "All Campaigns" ? allKeywords : allKeywords.filter((k: any) => k.campaign === campaignFilter);
   const heatmap:  any[] = data?.heatmap   ?? [];
   const totalVol: number = data?.total_search_volume ?? 0;
   const avgCtr:   number = data?.avg_ctr             ?? 0;
   const avgQs:    number = data?.avg_quality_score    ?? 0;
   const ctrChg:   number = data?.ctr_change_pct       ?? 0;
+
+  const exportKeywords = () => exportToCsv("nexus-keywords.csv", keywords.map((k: any) => ({
+    keyword: k.keyword, status: k.status, campaign: k.campaign, volume: k.volume,
+    ctr: k.ctr, cpc: k.cpc, quality_score: k.quality_score, trend: k.trend,
+  })));
 
   const KPIS = [
     { label: "Total Search Volume", value: fmtVol(totalVol), icon: "search_insights", delta: `+${ctrChg.toFixed(1)}%`, dir: "up" as const },
@@ -88,7 +96,7 @@ export default function LiveKeywords() {
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          <Button icon="download">Export</Button>
+          <Button icon="download" onClick={exportKeywords}>Export</Button>
           <Button variant="primary" icon="refresh" onClick={load}>Refresh</Button>
         </div>
       </div>
@@ -179,9 +187,13 @@ export default function LiveKeywords() {
         <Card className="md:col-span-12 overflow-hidden p-0">
           <div className="p-card-padding border-b border-outline-variant/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <h3 className="text-headline-md text-on-surface">Top Performing Keywords</h3>
-            <select className="w-full sm:w-52 appearance-none pl-4 pr-8 py-1.5 bg-surface border border-outline-variant rounded-lg text-body-sm focus:outline-none focus:border-primary text-on-surface">
+            <select
+              value={campaignFilter}
+              onChange={(e) => setCampaignFilter(e.target.value)}
+              className="w-full sm:w-52 appearance-none pl-4 pr-8 py-1.5 bg-surface border border-outline-variant rounded-lg text-body-sm focus:outline-none focus:border-primary text-on-surface"
+            >
               <option>All Campaigns</option>
-              {[...new Set(keywords.map((k: any) => k.campaign))].map((c: any) => (
+              {[...new Set(allKeywords.map((k: any) => k.campaign))].map((c: any) => (
                 <option key={c}>{c}</option>
               ))}
             </select>

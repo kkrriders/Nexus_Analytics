@@ -157,7 +157,7 @@ function CheckoutPageInner() {
           ))}
         </div>
 
-        <Link href="/" style={{ fontSize: 13, color: "#475569", textDecoration: "none" }}>
+        <Link href="/plans" style={{ fontSize: 13, color: "#475569", textDecoration: "none" }}>
           ← Back to Plans
         </Link>
       </div>
@@ -423,8 +423,8 @@ function CheckoutPageInner() {
 
           <p style={{ textAlign: "center", marginTop: 14, fontSize: 12, color: "#94A3B8" }}>
             By proceeding you agree to our{" "}
-            <a href="#" style={{ color: "#4F46E5" }}>Terms of Service</a> and{" "}
-            <a href="#" style={{ color: "#4F46E5" }}>Privacy Policy</a>. Cancel anytime.
+            <Link href="/terms" style={{ color: "#4F46E5" }}>Terms of Service</Link> and{" "}
+            <Link href="/privacy" style={{ color: "#4F46E5" }}>Privacy Policy</Link>. Cancel anytime.
           </p>
         </div>
 

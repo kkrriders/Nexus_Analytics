@@ -78,7 +78,7 @@ export function TrendChart({ history }: { history?: DataPoint[] }) {
               key={tf}
               onClick={() => setActiveTime(tf)}
               className={`px-3 py-1 rounded-[6px] text-[12px] font-medium transition-all ${
-                activeTime === tf ? "bg-white shadow-sm text-on-surface" : "text-on-surface-variant hover:text-on-surface"
+                activeTime === tf ? "bg-surface-bright shadow-sm text-on-surface" : "text-on-surface-variant hover:text-on-surface"
               }`}
             >
               {tf}

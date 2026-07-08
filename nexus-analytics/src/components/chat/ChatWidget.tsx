@@ -72,7 +72,7 @@ export function ChatWidget() {
       </button>
 
       {open && (
-        <div className="fixed bottom-24 right-6 z-[60] w-[360px] max-w-[calc(100vw-3rem)] h-[480px] max-h-[calc(100vh-8rem)] bg-white border border-outline-variant rounded-[16px] shadow-2xl flex flex-col overflow-hidden">
+        <div className="fixed bottom-24 right-6 z-[60] w-[360px] max-w-[calc(100vw-3rem)] h-[480px] max-h-[calc(100vh-8rem)] bg-surface-bright border border-outline-variant rounded-[16px] shadow-2xl flex flex-col overflow-hidden">
           <div className="px-4 py-3.5 border-b border-outline-variant flex items-center gap-2.5 bg-[#F5F3FF]/50">
             <div className="w-8 h-8 rounded-[8px] bg-ai flex items-center justify-center shrink-0">
               <Icon name="smart_toy" className="text-white text-[16px]" fill />

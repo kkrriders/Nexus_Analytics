@@ -2,7 +2,8 @@ import os
 import time
 import httpx
 from collections import defaultdict, deque
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import date
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from pipeline import run_pipeline
 from models.schemas import DashboardData, AudienceData, KeywordData, CreativeData
@@ -12,6 +13,7 @@ from preprocessing.mock_generator import (
 from auth import require_admin, get_current_user
 from database.postgres_client import query as pg_query, execute as pg_execute
 from ai.chat_engine import answer as chat_answer
+from notifications import create_notification
 
 router = APIRouter()
 
@@ -40,29 +42,90 @@ async def _account_id_for(user: dict) -> str | None:
     return rows[0]["id"] if rows else None
 
 
+def _recommendation_actions(user_id: str) -> dict[tuple[str, str], str]:
+    """Map of (campaign_id, rec_type) -> 'approved'|'rejected' for this user's past decisions."""
+    rows = pg_query(
+        "SELECT campaign_id, rec_type, action FROM public.recommendation_actions WHERE user_id = %(uid)s",
+        {"uid": user_id},
+    )
+    return {(r["campaign_id"], r["rec_type"]): r["action"] for r in rows}
+
+
+def _apply_recommendation_actions(recommendations: list, user_id: str) -> list:
+    """Attach each user's approve/reject decision and drop rejected recommendations."""
+    actions = _recommendation_actions(user_id)
+    if not actions:
+        return recommendations
+    kept = []
+    for r in recommendations:
+        action = actions.get((r.campaign_id, r.type))
+        if action == "rejected":
+            continue
+        if action == "approved":
+            r = r.model_copy(update={"status": "approved"})
+        kept.append(r)
+    return kept
+
+
 @router.get("/dashboard", response_model=DashboardData)
-async def get_dashboard(user: dict = Depends(get_current_user)):
+async def get_dashboard(days: int = Query(30, ge=7, le=90), user: dict = Depends(get_current_user)):
     """Full dashboard payload — KPIs, campaigns, alerts, recommendations, forecasts."""
-    return run_pipeline(await _account_id_for(user))
+    data = run_pipeline(await _account_id_for(user), days=days)
+    data.recommendations = _apply_recommendation_actions(data.recommendations, user["id"])
+
+    for alert in data.alerts:
+        if alert.severity == "critical":
+            create_notification(
+                user_id=user["id"], level="critical", title=alert.message, body=alert.detail,
+                link="/dashboard", dedup_key=f"{alert.id.rsplit('_', 1)[0]}_{date.today().isoformat()}",
+            )
+    return data
 
 
 @router.get("/campaigns")
-async def get_campaigns(user: dict = Depends(get_current_user)):
+async def get_campaigns(days: int = Query(30, ge=7, le=90), user: dict = Depends(get_current_user)):
     """Campaign list with metrics, health, and history for Campaign Analytics page."""
-    return run_pipeline(await _account_id_for(user)).campaigns
+    return run_pipeline(await _account_id_for(user), days=days).campaigns
 
 
 @router.get("/recommendations")
 async def get_recommendations(user: dict = Depends(get_current_user)):
     """AI recommendations list plus aggregate KPIs (used by AI Recommendations page)."""
     data = run_pipeline(await _account_id_for(user))
-    return {"recommendations": data.recommendations, "kpis": data.kpis}
+    recs = _apply_recommendation_actions(data.recommendations, user["id"])
+    return {"recommendations": recs, "kpis": data.kpis}
+
+
+class RecommendationActionBody(BaseModel):
+    campaign_id: str
+    type: str
+    title: str
+    action: str  # "approved" | "rejected"
+
+
+@router.post("/recommendations/action")
+async def act_on_recommendation(body: RecommendationActionBody, user: dict = Depends(get_current_user)):
+    """Approve or reject a recommendation. Persists per (user, campaign, type) so the
+    decision survives the next 5-minute pipeline regeneration."""
+    if body.action not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="action must be 'approved' or 'rejected'")
+
+    ok = pg_execute(
+        """INSERT INTO public.recommendation_actions (user_id, campaign_id, rec_type, rec_title, action)
+           VALUES (%(uid)s, %(cid)s, %(rtype)s, %(title)s, %(action)s)
+           ON CONFLICT (user_id, campaign_id, rec_type)
+           DO UPDATE SET action = %(action)s, rec_title = %(title)s, created_at = now()""",
+        {"uid": user["id"], "cid": body.campaign_id, "rtype": body.type, "title": body.title, "action": body.action},
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to save decision — is Postgres reachable?")
+    return {"status": "ok", "action": body.action}
 
 
 @router.get("/forecasts")
-async def get_forecasts(user: dict = Depends(get_current_user)):
-    """Metric forecasts + 30-day aggregated trend history (used by Trend Forecasting page)."""
-    data = run_pipeline(await _account_id_for(user))
+async def get_forecasts(days: int = Query(30, ge=7, le=90), user: dict = Depends(get_current_user)):
+    """Metric forecasts + aggregated trend history (used by Trend Forecasting page)."""
+    data = run_pipeline(await _account_id_for(user), days=days)
     return {"forecasts": data.forecasts, "trend_history": data.trend_history, "kpis": data.kpis}
 
 

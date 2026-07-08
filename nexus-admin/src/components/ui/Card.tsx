@@ -5,7 +5,7 @@ type CardProps = { children: React.ReactNode; className?: string };
 
 export function Card({ children, className }: CardProps) {
   return (
-    <div className={clsx("bg-white border border-outline-variant rounded-[14px] elevation-card transition-all duration-200", className)}>
+    <div className={clsx("bg-surface-bright border border-outline-variant rounded-[14px] elevation-card transition-all duration-200", className)}>
       {children}
     </div>
   );

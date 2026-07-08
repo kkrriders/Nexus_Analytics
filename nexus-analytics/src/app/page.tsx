@@ -1244,13 +1244,22 @@ function Footer() {
         {[
           {
             heading: "Product",
-            links: ["Dashboard", "Campaign Analytics", "AI Recommendations", "Forecasting"],
+            links: [
+              { label: "Dashboard", href: "/dashboard" },
+              { label: "Campaign Analytics", href: "/campaign-analytics" },
+              { label: "AI Recommendations", href: "/ai-recommendations" },
+              { label: "Forecasting", href: "/trend-forecasting" },
+            ],
           },
           {
             heading: "Platforms",
-            links: ["Google Ads", "Meta Ads", "LinkedIn Ads", "TikTok Ads"],
+            links: [
+              { label: "Google Ads", href: "/#platforms" },
+              { label: "Meta Ads", href: "/#platforms" },
+              { label: "LinkedIn Ads", href: "/#platforms" },
+              { label: "TikTok Ads", href: "/#platforms" },
+            ],
           },
-          { heading: "Company", links: ["About", "Blog", "Careers", "Contact"] },
         ].map((col) => (
           <div key={col.heading}>
             <div
@@ -1266,13 +1275,13 @@ function Footer() {
             </div>
             <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
               {col.links.map((l) => (
-                <li key={l}>
-                  <a
-                    href="#"
+                <li key={l.label}>
+                  <Link
+                    href={l.href}
                     style={{ fontSize: 13, color: "#94A3B8", textDecoration: "none" }}
                   >
-                    {l}
-                  </a>
+                    {l.label}
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -1295,14 +1304,18 @@ function Footer() {
           © 2026 Nexus Analytics. All rights reserved.
         </span>
         <div style={{ display: "flex", gap: 20 }}>
-          {["Privacy Policy", "Terms of Service", "SOC 2 Report"].map((l) => (
-            <a
-              key={l}
-              href="#"
+          {[
+            { label: "Privacy Policy", href: "/privacy" },
+            { label: "Terms of Service", href: "/terms" },
+            { label: "Security", href: "/security" },
+          ].map((l) => (
+            <Link
+              key={l.label}
+              href={l.href}
               style={{ fontSize: 12, color: "#94A3B8", textDecoration: "none" }}
             >
-              {l}
-            </a>
+              {l.label}
+            </Link>
           ))}
         </div>
       </div>

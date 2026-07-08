@@ -1,11 +1,37 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
 import { fetchCreatives } from "@/lib/api";
+
+const TYPE_OPTIONS = ["image", "video", "carousel"];
+
+function FilterPopover({ label, count, children }: { label: string; count: number; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onClickAway = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onClickAway);
+    return () => document.removeEventListener("mousedown", onClickAway);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <Button icon="filter_list" onClick={() => setOpen((o) => !o)}>
+        {label}{count > 0 ? ` (${count})` : ""}
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-11 w-56 bg-surface-bright border border-outline-variant rounded-[10px] shadow-lg py-1.5 z-50 max-h-72 overflow-y-auto custom-scrollbar">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
 
 type MetricDir = "up" | "down" | "flat";
 
@@ -93,6 +119,8 @@ export default function LiveCreatives() {
   const [creatives, setCreatives] = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
+  const [campaignFilter, setCampaignFilter] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -123,6 +151,22 @@ export default function LiveCreatives() {
     </div>
   );
 
+  const campaignOptions = useMemo(() => Array.from(new Set(creatives.map((c) => c.campaign).filter(Boolean))), [creatives]);
+
+  const toggle = (set: Set<string>, value: string, setter: (s: Set<string>) => void) => {
+    const next = new Set(set);
+    if (next.has(value)) next.delete(value); else next.add(value);
+    setter(next);
+  };
+
+  const filtered = creatives.filter((c: any) => {
+    if (typeFilter.size > 0 && !typeFilter.has(c.type)) return false;
+    if (campaignFilter.size > 0 && !campaignFilter.has(c.campaign)) return false;
+    return true;
+  });
+
+  const filterCount = typeFilter.size + campaignFilter.size;
+
   return (
     <>
       <PageHeader
@@ -130,14 +174,41 @@ export default function LiveCreatives() {
         subtitle="Fatigue scoring, CTR analysis, and AI-driven recommendations across all creatives."
         actions={
           <>
-            <Button icon="filter_list">Filter</Button>
+            <FilterPopover label="Filter" count={filterCount}>
+              <p className="px-3 py-1.5 text-[11px] font-semibold text-on-surface-variant uppercase tracking-wide">Type</p>
+              {TYPE_OPTIONS.map((t) => (
+                <label key={t} className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-on-surface hover:bg-surface-container-low cursor-pointer capitalize">
+                  <input type="checkbox" checked={typeFilter.has(t)} onChange={() => toggle(typeFilter, t, setTypeFilter)} className="accent-primary" />
+                  {t}
+                </label>
+              ))}
+              <p className="px-3 py-1.5 mt-1 text-[11px] font-semibold text-on-surface-variant uppercase tracking-wide border-t border-outline-variant">Campaign</p>
+              {campaignOptions.map((c) => (
+                <label key={c} className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-on-surface hover:bg-surface-container-low cursor-pointer">
+                  <input type="checkbox" checked={campaignFilter.has(c)} onChange={() => toggle(campaignFilter, c, setCampaignFilter)} className="accent-primary" />
+                  <span className="truncate">{c}</span>
+                </label>
+              ))}
+              {filterCount > 0 && (
+                <button onClick={() => { setTypeFilter(new Set()); setCampaignFilter(new Set()); }} className="w-full text-left px-3 py-2 text-[12px] text-primary hover:bg-surface-container-low border-t border-outline-variant mt-1">
+                  Clear all
+                </button>
+              )}
+            </FilterPopover>
             <Button variant="primary" icon="refresh" onClick={load}>Refresh</Button>
           </>
         }
       />
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter pb-margin-desktop">
-        {creatives.map((c: any) => <CreativeCard key={c.id} creative={c} />)}
-      </div>
+      {filtered.length === 0 ? (
+        <div className="py-16 text-center text-on-surface-variant">
+          <Icon name="filter_list_off" className="text-[40px] text-outline mb-3" />
+          <p>No creatives match the selected filters.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter pb-margin-desktop">
+          {filtered.map((c: any) => <CreativeCard key={c.id} creative={c} />)}
+        </div>
+      )}
     </>
   );
 }

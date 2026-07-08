@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
-import { fetchRecommendations } from "@/lib/api";
+import { fetchRecommendations, sendRecommendationAction } from "@/lib/api";
 
 type Priority = "high" | "medium" | "low";
 
@@ -28,10 +28,14 @@ const TYPE_ICON: Record<string, string> = {
 
 const FILTERS = ["All", "Budget", "Creative", "Audience", "Bid", "Schedule"];
 
-function RecCard({ rec, index }: { rec: any; index: number }) {
+function RecCard({ rec, index, busy, onApprove, onReject }: {
+  rec: any; index: number; busy: boolean;
+  onApprove: () => void; onReject: () => void;
+}) {
   const priority = (rec.priority ?? "medium") as Priority;
   const style    = PRIORITY_STYLES[priority] ?? PRIORITY_STYLES.medium;
   const icon     = TYPE_ICON[rec.type ?? ""] ?? "lightbulb";
+  const approved = rec.status === "approved";
 
   const upliftLines: string[] = [];
   if (rec.roas_impact    > 0) upliftLines.push(`+${rec.roas_impact.toFixed(1)}% ROAS`);
@@ -40,7 +44,7 @@ function RecCard({ rec, index }: { rec: any; index: number }) {
   const uplift = upliftLines[0] ?? "Optimization";
 
   return (
-    <Card className={clsx("lg:col-span-4 p-card-padding flex flex-col hover:shadow-md transition-shadow",
+    <Card id={`rec-${rec.id}`} className={clsx("lg:col-span-4 p-card-padding flex flex-col hover:shadow-md transition-shadow scroll-mt-24",
       index >= 3 && "opacity-75"
     )}>
       <div className="flex items-center justify-between mb-4">
@@ -103,12 +107,29 @@ function RecCard({ rec, index }: { rec: any; index: number }) {
           </div>
         </div>
         <div className="flex gap-2">
-          <button className="p-1.5 text-on-surface-variant hover:text-error hover:bg-error-container/20 rounded transition-colors" title="Reject">
-            <Icon name="close" className="text-[16px]" />
-          </button>
-          <button className="px-3 py-1.5 bg-primary text-on-primary text-label-md rounded-md hover:bg-surface-tint transition-colors">
-            Approve
-          </button>
+          {approved ? (
+            <span className="flex items-center gap-1 px-3 py-1.5 text-label-md text-tertiary">
+              <Icon name="check_circle" className="text-[16px] fill" /> Approved
+            </span>
+          ) : (
+            <>
+              <button
+                onClick={onReject}
+                disabled={busy}
+                className="p-1.5 text-on-surface-variant hover:text-error hover:bg-error-container/20 rounded transition-colors disabled:opacity-50"
+                title="Reject"
+              >
+                <Icon name="close" className="text-[16px]" />
+              </button>
+              <button
+                onClick={onApprove}
+                disabled={busy}
+                className="px-3 py-1.5 bg-primary text-on-primary text-label-md rounded-md hover:bg-surface-tint transition-colors disabled:opacity-50"
+              >
+                {busy ? "…" : "Approve"}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </Card>
@@ -120,6 +141,8 @@ export default function LiveRecommendations() {
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState("All");
+  const [busyIds, setBusyIds]   = useState<Set<string>>(new Set());
+  const [applyingAll, setApplyingAll] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -133,6 +156,59 @@ export default function LiveRecommendations() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const setRecStatus = useCallback((rec: any, action: "approved" | "rejected") => {
+    setData((prev: any) => {
+      if (!prev) return prev;
+      const recommendations = action === "rejected"
+        ? prev.recommendations.filter((r: any) => r.id !== rec.id)
+        : prev.recommendations.map((r: any) => r.id === rec.id ? { ...r, status: "approved" } : r);
+      return { ...prev, recommendations };
+    });
+  }, []);
+
+  const actOnRecommendation = useCallback(async (rec: any, action: "approved" | "rejected") => {
+    setBusyIds((prev) => new Set(prev).add(rec.id));
+    try {
+      await sendRecommendationAction({ campaign_id: rec.campaign_id, type: rec.type, title: rec.title, action });
+      setRecStatus(rec, action);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusyIds((prev) => { const next = new Set(prev); next.delete(rec.id); return next; });
+    }
+  }, [setRecStatus]);
+
+  const applyAllSafe = useCallback(async () => {
+    const recs: any[] = data?.recommendations ?? [];
+    const safe = recs.filter((r) => r.status !== "approved" && !/pause|pausing/i.test(r.title ?? ""));
+    if (safe.length === 0) return;
+    setApplyingAll(true);
+    try {
+      await Promise.all(safe.map((r) => sendRecommendationAction({
+        campaign_id: r.campaign_id, type: r.type, title: r.title, action: "approved",
+      })));
+      setData((prev: any) => prev ? {
+        ...prev,
+        recommendations: prev.recommendations.map((r: any) =>
+          safe.some((s) => s.id === r.id) ? { ...r, status: "approved" } : r
+        ),
+      } : prev);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setApplyingAll(false);
+    }
+  }, [data]);
+
+  const viewInsight = useCallback((rec: any) => {
+    const el = document.getElementById(`rec-${rec.id}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-primary");
+      setTimeout(() => el.classList.remove("ring-2", "ring-primary"), 1600);
+    }
+  }, []);
 
   if (loading) return (
     <div className="flex items-center justify-center h-64 gap-3">
@@ -175,7 +251,9 @@ export default function LiveRecommendations() {
         actions={
           <>
             <Button variant="secondary" onClick={load}>Recalculate</Button>
-            <Button variant="primary" icon="check_circle">Apply All Safe Recs</Button>
+            <Button variant="primary" icon="check_circle" onClick={applyAllSafe} disabled={applyingAll}>
+              {applyingAll ? "Applying…" : "Apply All Safe Recs"}
+            </Button>
           </>
         }
       />
@@ -271,7 +349,10 @@ export default function LiveRecommendations() {
                       <p className="text-body-sm opacity-90 mt-1 line-clamp-2">{r.description}</p>
                     </div>
                   </div>
-                  <button className="mt-3 w-full py-1.5 bg-white text-primary text-label-md font-medium rounded-md hover:bg-surface-container-low transition-colors">
+                  <button
+                    onClick={() => viewInsight(r)}
+                    className="mt-3 w-full py-1.5 bg-white text-primary text-label-md font-medium rounded-md hover:bg-surface-container-low transition-colors"
+                  >
                     View Insight
                   </button>
                 </div>
@@ -310,7 +391,16 @@ export default function LiveRecommendations() {
             <p className="text-body-md">No recommendations match the selected filter.</p>
           </div>
         ) : (
-          filtered.map((rec: any, i: number) => <RecCard key={rec.id ?? i} rec={rec} index={i} />)
+          filtered.map((rec: any, i: number) => (
+            <RecCard
+              key={rec.id ?? i}
+              rec={rec}
+              index={i}
+              busy={busyIds.has(rec.id)}
+              onApprove={() => actOnRecommendation(rec, "approved")}
+              onReject={() => actOnRecommendation(rec, "rejected")}
+            />
+          ))
         )}
 
       </div>

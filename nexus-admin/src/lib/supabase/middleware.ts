@@ -3,9 +3,11 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
-// Every route in this app is the admin console — only /login is public.
+const PUBLIC_PATHS = ["/login", "/forgot-password", "/reset-password"];
+
+// Every route in this app is the admin console except the auth-adjacent pages above.
 function isAdminConsolePath(pathname: string) {
-  return pathname !== "/login";
+  return !PUBLIC_PATHS.includes(pathname);
 }
 
 export async function updateSession(request: NextRequest) {
@@ -57,7 +59,7 @@ export async function updateSession(request: NextRequest) {
     // Fail closed: this entire app is admin-only, so on any Supabase error
     // (misconfig, transient outage) send to /login rather than 500ing —
     // never grant access when we can't verify who the user is.
-    if (pathname === "/login") {
+    if (PUBLIC_PATHS.includes(pathname)) {
       return NextResponse.next({ request });
     }
     return NextResponse.redirect(new URL("/login", request.url));

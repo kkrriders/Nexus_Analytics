@@ -10,6 +10,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router
 from api.accounts import router as accounts_router
+from api.notifications import router as notifications_router
+from api.admin_integrations import router as admin_integrations_router
 from database.clickhouse_client import get_client, is_connected
 from database.clickhouse_schema import create_tables
 from ai.deepseek_client import get_client as get_deepseek, is_available as deepseek_available
@@ -39,6 +41,8 @@ app.add_middleware(
 
 app.include_router(router, prefix="/api")
 app.include_router(accounts_router, prefix="/api")
+app.include_router(notifications_router, prefix="/api")
+app.include_router(admin_integrations_router, prefix="/api")
 
 
 @app.get("/healthz")

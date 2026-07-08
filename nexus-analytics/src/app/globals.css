@@ -149,6 +149,53 @@
   --text-kpi-label--font-weight: 500;
 }
 
+/* ---- Dark theme ----
+ * Every utility in this file is generated from the @theme custom properties
+ * above (Tailwind v4 keeps them as real CSS variables), so overriding them
+ * here re-themes every component that uses the semantic tokens (bg-surface,
+ * text-on-surface, bg-primary-container, ...) with no per-component changes.
+ * Set by ThemeProvider (src/lib/theme.tsx), which also runs a pre-paint
+ * inline script in layout.tsx to avoid a light-mode flash on load. */
+:root[data-theme="dark"] {
+  --color-surface:                  #0B1220;
+  --color-surface-dim:              #060A12;
+  --color-surface-bright:           #111827;
+  --color-surface-container-lowest: #0B1220;
+  --color-surface-container-low:    #161F2E;
+  --color-surface-container:        #1B2536;
+  --color-surface-container-high:   #212C3F;
+  --color-surface-container-highest:#283449;
+  --color-surface-variant:          #1E293B;
+
+  --color-on-surface:         #E2E8F0;
+  --color-on-surface-variant: #94A3B8;
+  --color-inverse-surface:    #E2E8F0;
+  --color-inverse-on-surface: #0F172A;
+  --color-outline:            #64748B;
+  --color-outline-variant:    #2A3648;
+
+  --color-primary-container:   #262254;
+  --color-on-primary-container:#C7D2FE;
+
+  --color-secondary-container:   #1E3A5F;
+  --color-on-secondary-container:#93C5FD;
+
+  --color-tertiary-container:   #064E3B;
+  --color-on-tertiary-container:#6EE7B7;
+
+  --color-error-container:   #7F1D1D;
+  --color-on-error-container:#FCA5A5;
+
+  --color-warning-container:   #78350F;
+  --color-on-warning-container:#FCD34D;
+
+  --color-ai-container:   #3B0764;
+  --color-on-ai-container:#D8B4FE;
+
+  --color-background:    #0B1220;
+  --color-on-background: #E2E8F0;
+}
+
 html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
 body {

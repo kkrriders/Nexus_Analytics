@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { KpiCard } from "@/components/ui/KpiCard";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { TrendChart, SpendDonut } from "@/components/charts/TrendChart";
 import { clsx } from "@/lib/clsx";
-import { fetchDashboard } from "@/lib/api";
+import { fetchDashboard, sendRecommendationAction } from "@/lib/api";
+import { useDashboardPrefs } from "@/lib/dashboardPrefs";
+import { exportToCsv } from "@/lib/csv";
 
 /* ─── helpers ─────────────────────────────────────────────────────────────── */
 function fmt(value: number, unit: string): string {
@@ -56,12 +58,27 @@ export default function LiveDashboard() {
   const [error, setError]         = useState<string | null>(null);
   const [countdown, setCountdown] = useState(300);
   const [lastUpdated, setLastUpdated] = useState<string>("");
+  const [actingOnTopRec, setActingOnTopRec] = useState(false);
+  const [tableStatusFilter, setTableStatusFilter] = useState<Set<string>>(new Set());
+  const [tableSort, setTableSort] = useState<"spend" | "roas" | "health">("spend");
+  const [tableFilterOpen, setTableFilterOpen] = useState(false);
+  const tableFilterRef = useRef<HTMLDivElement>(null);
+  const { days, isPlatformActive } = useDashboardPrefs();
+
+  useEffect(() => {
+    if (!tableFilterOpen) return;
+    const onClickAway = (e: MouseEvent) => {
+      if (tableFilterRef.current && !tableFilterRef.current.contains(e.target as Node)) setTableFilterOpen(false);
+    };
+    document.addEventListener("mousedown", onClickAway);
+    return () => document.removeEventListener("mousedown", onClickAway);
+  }, [tableFilterOpen]);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const d = await fetchDashboard();
+      const d = await fetchDashboard(days);
       setData(d);
       setCountdown(d.next_update_in_seconds ?? 300);
       setLastUpdated(new Date().toLocaleTimeString());
@@ -70,7 +87,7 @@ export default function LiveDashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [days]);
 
   // Initial load
   useEffect(() => { load(); }, [load]);
@@ -108,7 +125,15 @@ export default function LiveDashboard() {
 
   const kpis = data?.kpis;
   const changes = data?.kpi_changes;
-  const campaigns = data?.campaigns ?? [];
+  const campaignsFiltered = (data?.campaigns ?? [])
+    .filter((c: any) => isPlatformActive(c.campaign?.platform))
+    .filter((c: any) => tableStatusFilter.size === 0 || tableStatusFilter.has(c.campaign?.status));
+  const tableSortKey = tableSort === "health" ? "score" : tableSort;
+  const campaigns = [...campaignsFiltered].sort((a: any, b: any) =>
+    tableSort === "health"
+      ? (b.health?.score ?? 0) - (a.health?.score ?? 0)
+      : (b.metrics?.[tableSortKey] ?? 0) - (a.metrics?.[tableSortKey] ?? 0)
+  );
   const platforms = data?.platforms ?? [];
   const alerts = data?.alerts ?? [];
   const recommendations = data?.recommendations ?? [];
@@ -133,6 +158,19 @@ export default function LiveDashboard() {
   const criticalAlerts = alerts.filter((a: any) => a.severity === "critical");
   const warningAlerts  = alerts.filter((a: any) => a.severity === "warning");
 
+  const actOnTopRec = async (action: "approved" | "rejected") => {
+    if (!topRec || actingOnTopRec) return;
+    setActingOnTopRec(true);
+    try {
+      await sendRecommendationAction({ campaign_id: topRec.campaign_id, type: topRec.type, title: topRec.title, action });
+      await load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setActingOnTopRec(false);
+    }
+  };
+
   type Status = "active" | "paused" | "review" | "draft";
   const STATUS_STYLE: Record<Status, string> = {
     active: "bg-[#ECFDF5] text-[#065F46]",
@@ -140,6 +178,14 @@ export default function LiveDashboard() {
     review: "bg-[#FFFBEB] text-[#92400E]",
     draft:  "bg-[#F1F5F9] text-[#475569]",
   };
+
+  const exportKpis = () => exportToCsv("nexus-dashboard-kpis.csv", KPI_ROWS.map((k) => ({
+    metric: k.label, value: k.value, change: k.change, direction: k.direction,
+  })));
+
+  const exportCampaignTrend = () => exportToCsv("nexus-trend-history.csv", history.map((h: any) => ({
+    date: h.date, spend: h.spend, revenue: h.revenue, roas: h.roas, ctr: h.ctr, cpa: h.cpa, conversions: h.conversions,
+  })));
 
   return (
     <div className="space-y-8 pb-10">
@@ -159,7 +205,7 @@ export default function LiveDashboard() {
             <div className="w-2 h-2 rounded-full bg-tertiary animate-pulse" />
             <span>Next refresh in <span className="font-mono font-semibold text-on-surface">{countdown}s</span></span>
           </div>
-          <Button icon="file_download" size="sm">Export</Button>
+          <Button icon="file_download" size="sm" onClick={exportKpis}>Export</Button>
           <Button variant="primary" icon="refresh" size="sm" onClick={load}>Refresh</Button>
         </div>
       </div>
@@ -184,7 +230,7 @@ export default function LiveDashboard() {
             </span>
           </SectionLabel>
 
-          <div className="bg-white border border-outline-variant rounded-[14px] elevation-card overflow-hidden">
+          <div className="bg-surface-bright border border-outline-variant rounded-[14px] elevation-card overflow-hidden">
             <div className="px-6 py-4 border-b border-outline-variant flex items-center justify-between bg-[#F5F3FF]/50">
               <div className="flex items-center gap-3">
                 {criticalAlerts.length > 0 && <span className="w-2.5 h-2.5 rounded-full bg-error animate-pulse" />}
@@ -197,7 +243,7 @@ export default function LiveDashboard() {
               </div>
               <div className="flex items-center gap-2">
                 <Link href="/ai-recommendations"><Button size="sm">View All</Button></Link>
-                <Button size="sm" icon="settings">Configure AI</Button>
+                <Link href="/settings"><Button size="sm" icon="settings">Configure AI</Button></Link>
               </div>
             </div>
 
@@ -274,9 +320,8 @@ export default function LiveDashboard() {
                 <p className="text-[12px] font-bold text-outline uppercase tracking-widest mb-4">Quick Actions</p>
                 <div className="space-y-3">
                   {[
-                    { icon:"check_circle", bg:"bg-[#ECFDF5]", border:"border-[#A7F3D0]", color:"text-[#10B981]", label:"Approve", sub:"Apply changes immediately", hover:"hover:bg-[#D1FAE5]", textColor:"text-[#065F46]" },
-                    { icon:"cancel",       bg:"bg-[#FEF2F2]", border:"border-[#FECACA]", color:"text-error",     label:"Reject",  sub:"Dismiss this suggestion",   hover:"hover:bg-[#FEE2E2]", textColor:"text-[#991B1B]" },
-                    { icon:"schedule",     bg:"bg-[#FFFBEB]", border:"border-[#FDE68A]", color:"text-warning",   label:"Schedule",sub:"Apply at a specific time",   hover:"hover:bg-[#FEF3C7]", textColor:"text-[#92400E]" },
+                    { icon:"check_circle", bg:"bg-[#ECFDF5]", border:"border-[#A7F3D0]", color:"text-[#10B981]", label:"Approve", sub:"Apply changes immediately", hover:"hover:bg-[#D1FAE5]", textColor:"text-[#065F46]", action: "approved" as const },
+                    { icon:"cancel",       bg:"bg-[#FEF2F2]", border:"border-[#FECACA]", color:"text-error",     label:"Reject",  sub:"Dismiss this suggestion",   hover:"hover:bg-[#FEE2E2]", textColor:"text-[#991B1B]", action: "rejected" as const },
                     { icon:"insights",     bg:"bg-[#F5F3FF]", border:"border-[#DDD6FE]", color:"text-ai",        label:"Full Analysis", sub:"See all AI reasoning", hover:"hover:bg-[#EDE9FE]", textColor:"text-[#4C1D95]" },
                   ].map(a => {
                     const content = (
@@ -288,11 +333,13 @@ export default function LiveDashboard() {
                         </div>
                       </>
                     );
-                    const className = clsx("w-full flex items-center gap-3 px-4 py-3 border rounded-[10px] transition-colors text-left", a.bg, a.border, a.hover);
-                    return a.label === "Full Analysis" ? (
-                      <Link key={a.label} href="/ai-recommendations" className={className}>{content}</Link>
-                    ) : (
-                      <button key={a.label} className={className}>{content}</button>
+                    const className = clsx("w-full flex items-center gap-3 px-4 py-3 border rounded-[10px] transition-colors text-left", a.bg, a.border, a.hover,
+                      !topRec && "action" in a && "opacity-50 pointer-events-none");
+                    if (a.label === "Full Analysis") {
+                      return <Link key={a.label} href="/ai-recommendations" className={className}>{content}</Link>;
+                    }
+                    return (
+                      <button key={a.label} disabled={actingOnTopRec} onClick={() => actOnTopRec(a.action!)} className={className}>{content}</button>
                     );
                   })}
                 </div>
@@ -350,7 +397,7 @@ export default function LiveDashboard() {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
           <Card className="xl:col-span-2 p-6">
             <CardHeader title="Performance Trends (30 Days)" icon="show_chart" action={
-              <Button size="sm" icon="file_download">Export</Button>
+              <Button size="sm" icon="file_download" onClick={exportCampaignTrend}>Export</Button>
             } />
             <TrendChart history={history} />
           </Card>
@@ -382,9 +429,39 @@ export default function LiveDashboard() {
           <div className="px-6 pt-5 pb-4 border-b border-outline-variant flex items-center justify-between">
             <h3 className="text-[17px] font-semibold text-on-surface">All Campaigns</h3>
             <div className="flex items-center gap-2">
-              <Button size="sm" icon="filter_list">Filter</Button>
-              <Button size="sm" icon="sort">Sort</Button>
-              <Button variant="primary" size="sm" icon="add">New Campaign</Button>
+              <div className="relative" ref={tableFilterRef}>
+                <Button size="sm" icon="filter_list" onClick={() => setTableFilterOpen((o) => !o)}>
+                  Filter{tableStatusFilter.size > 0 ? ` (${tableStatusFilter.size})` : ""}
+                </Button>
+                {tableFilterOpen && (
+                  <div className="absolute right-0 top-9 w-44 bg-surface-bright border border-outline-variant rounded-[10px] shadow-lg py-1.5 z-50">
+                    {(["active", "paused", "review", "draft"] as const).map((s) => (
+                      <label key={s} className="flex items-center gap-2 px-3 py-1.5 text-[13px] text-on-surface hover:bg-surface-container-low cursor-pointer capitalize">
+                        <input
+                          type="checkbox"
+                          checked={tableStatusFilter.has(s)}
+                          onChange={() => setTableStatusFilter((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(s)) next.delete(s); else next.add(s);
+                            return next;
+                          })}
+                          className="accent-primary"
+                        />
+                        {s}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <Button
+                size="sm"
+                icon="sort"
+                onClick={() => setTableSort((prev) => prev === "spend" ? "roas" : prev === "roas" ? "health" : "spend")}
+                title="Cycle sort order"
+              >
+                Sort: {tableSort === "spend" ? "Spend" : tableSort === "roas" ? "ROAS" : "Health"}
+              </Button>
+              <Link href="/setup"><Button variant="primary" size="sm" icon="add">Connect Platform</Button></Link>
             </div>
           </div>
           <div className="overflow-x-auto custom-scrollbar">
@@ -484,7 +561,6 @@ export default function LiveDashboard() {
               <Icon name="notifications_active" className="text-[20px] text-error" />
               Alert Center
             </h3>
-            <Button size="sm">View All</Button>
           </div>
           <div className="divide-y divide-outline-variant/50">
             {alerts.length === 0 ? (
@@ -514,7 +590,7 @@ export default function LiveDashboard() {
               <Icon name="psychology" className="text-[20px] text-ai" />
               AI Recommendations
             </h3>
-            <Button size="sm">View All</Button>
+            <Link href="/ai-recommendations"><Button size="sm">View All</Button></Link>
           </div>
           <div className="divide-y divide-outline-variant/50">
             {recommendations.length === 0 ? (

@@ -2,9 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { createBrowserClient } from "@supabase/ssr";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
-import { createClient } from "@/lib/supabase/client";
+
+const EIGHT_HOURS = 60 * 60 * 8;
+const SIX_MONTHS = 60 * 60 * 24 * 180;
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -21,6 +25,7 @@ export default function AdminLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [keepSignedIn, setKeepSignedIn] = useState(true);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,7 +37,13 @@ export default function AdminLoginPage() {
     }
 
     setSubmitting(true);
-    const supabase = createClient();
+    // Session cookie lifetime follows "Keep me signed in" — unchecked expires the
+    // session after 8 hours instead of the usual 180-day persistent cookie.
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { cookieOptions: { maxAge: keepSignedIn ? SIX_MONTHS : EIGHT_HOURS } },
+    );
     const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
     if (signInError) {
@@ -155,7 +166,7 @@ export default function AdminLoginPage() {
                 <label htmlFor="password" className="block text-label-md text-on-surface-variant">
                   Password
                 </label>
-                <a href="#" className="text-label-md text-primary hover:underline">Forgot password?</a>
+                <Link href="/forgot-password" className="text-label-md text-primary hover:underline">Forgot password?</Link>
               </div>
               <div className="relative">
                 <Icon name="lock" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]" />
@@ -180,7 +191,12 @@ export default function AdminLoginPage() {
             </div>
 
             <label className="flex items-center gap-2 text-body-sm text-on-surface-variant select-none">
-              <input type="checkbox" className="rounded border-outline-variant text-primary focus:ring-primary" />
+              <input
+                type="checkbox"
+                checked={keepSignedIn}
+                onChange={(e) => setKeepSignedIn(e.target.checked)}
+                className="rounded border-outline-variant text-primary focus:ring-primary"
+              />
               Keep me signed in on this device
             </label>
 

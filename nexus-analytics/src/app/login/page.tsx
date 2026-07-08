@@ -124,9 +124,9 @@ function LoginPageInner() {
                 <label htmlFor="password" className="block text-label-md text-on-surface-variant">
                   Password
                 </label>
-                <a href="#" className="text-label-md text-primary hover:underline">
+                <Link href="/forgot-password" className="text-label-md text-primary hover:underline">
                   Forgot password?
-                </a>
+                </Link>
               </div>
               <div className="relative">
                 <Icon name="lock" className="absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]" />

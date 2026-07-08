@@ -182,12 +182,16 @@ def _aggregate_real_history(history_map: dict[str, list[dict]], days: int = 30) 
     return agg
 
 
-def run_pipeline(account_id: Optional[str] = None) -> DashboardData:
+def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardData:
     """
     account_id identifies the requesting user's own connected ad account
     (None if they haven't connected one). All real-data reads/writes and the
     recommendation/KPI/alert cache are scoped to it so one user's connected
     account is never visible to another user's request.
+
+    `days` bounds how much history feeds the trend charts and each campaign's
+    history series (7/30/90 — the TopNav date-range selector); it does not
+    change the KPI totals, which always reflect the current pipeline window.
     """
     window_seed = current_window_seed()
     ch_active = is_connected()
@@ -222,10 +226,10 @@ def run_pipeline(account_id: Optional[str] = None) -> DashboardData:
         prev    = derived_prev[cid]
         health  = compute_health(current, campaign.platform)
         if using_real:
-            history = real["history"][cid]
+            history = real["history"][cid][-days:]
             sparkl  = real["sparkline"][cid]
         else:
-            history = generate_daily_history(cid, days=30)
+            history = generate_daily_history(cid, days=days)
             sparkl  = generate_sparkline(cid, "revenue", 12)
         revenue_series = [pt["revenue"] for pt in history] if history else [0]
         trend  = detect_trend(revenue_series)
@@ -418,7 +422,7 @@ def run_pipeline(account_id: Optional[str] = None) -> DashboardData:
     platforms.sort(key=lambda p: p.spend, reverse=True)
 
     # ── 9. Forecasting ────────────────────────────────────────────────────────
-    agg_history = _aggregate_real_history(real["history"], days=30) if using_real else generate_aggregated_history(days=30)
+    agg_history = _aggregate_real_history(real["history"], days=days) if using_real else generate_aggregated_history(days=days)
     forecasts   = build_forecasts(agg_history)
 
     # ── 10. Metadata ──────────────────────────────────────────────────────────

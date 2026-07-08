@@ -8,6 +8,7 @@ import { Icon } from "@/components/ui/Icon";
 import { ComingSoon } from "@/components/ui/ComingSoon";
 import { clsx } from "@/lib/clsx";
 import { fetchForecasts } from "@/lib/api";
+import { useDashboardPrefs } from "@/lib/dashboardPrefs";
 
 function fmt(value: number, unit: string): string {
   if (unit === "currency") {
@@ -25,17 +26,18 @@ export default function LiveForecasting() {
   const [data, setData]       = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
+  const { days } = useDashboardPrefs();
 
   const load = useCallback(async () => {
     try {
       setLoading(true); setError(null);
-      setData(await fetchForecasts());
+      setData(await fetchForecasts(days));
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [days]);
 
   useEffect(() => { load(); }, [load]);
 

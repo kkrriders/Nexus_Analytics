@@ -1,32 +1,66 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { KpiCard } from "@/components/ui/KpiCard";
 import { Icon } from "@/components/ui/Icon";
-
-export const metadata: Metadata = { title: "Admin Overview" };
-
-const KPIS = [
-  { label: "Total Users",    value: "1,248", change: "12%",     direction: "up"   as const, icon: "group",      accent: "indigo"  as const },
-  { label: "Active (30d)",   value: "982",   change: "4%",      direction: "up"   as const, icon: "how_to_reg", accent: "emerald" as const },
-  { label: "Integrations",   value: "12",    change: "Healthy", direction: "flat" as const, icon: "cable",      accent: "blue"    as const },
-  { label: "Security Alerts",value: "2",     change: "Action",  direction: "down" as const, icon: "gpp_maybe",  accent: "rose"    as const },
-];
+import { fetchAdminUsers, fetchAdminIntegrations, fetchAdminNotifications } from "@/lib/api";
 
 const QUICK_LINKS = [
   { href: "/users", icon: "manage_accounts", title: "User Management", desc: "Roles, invitations and workspace access." },
   { href: "/integrations", icon: "api", title: "API & Integrations", desc: "Connections, keys and webhook health." },
 ];
 
-const ACTIVITY = [
-  { icon: "person_add", tone: "bg-secondary-container/15 text-secondary", text: "Invited d.chen@nexus.co as Editor", time: "10 min ago" },
-  { icon: "shield", tone: "bg-primary-container/15 text-primary", text: "Elena Smith promoted to Admin", time: "2 hours ago" },
-  { icon: "key", tone: "bg-tertiary-container/20 text-tertiary", text: "New production API key generated", time: "Yesterday" },
-  { icon: "gpp_maybe", tone: "bg-error-container/50 text-error", text: "Unusual sign-in flagged for review", time: "2 days ago" },
-];
+const LEVEL_ICON: Record<string, string> = { critical: "gpp_maybe", warning: "warning", info: "info" };
+const LEVEL_TONE: Record<string, string> = {
+  critical: "bg-error-container/50 text-error",
+  warning: "bg-tertiary-container/20 text-tertiary",
+  info: "bg-secondary-container/15 text-secondary",
+};
+
+function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
 
 export default function AdminOverviewPage() {
+  const [users, setUsers] = useState<any[]>([]);
+  const [integrations, setIntegrations] = useState<any[]>([]);
+  const [activity, setActivity] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      fetchAdminUsers().catch(() => []),
+      fetchAdminIntegrations().catch(() => []),
+      fetchAdminNotifications().catch(() => ({ notifications: [] })),
+    ]).then(([u, i, n]) => {
+      setUsers(u ?? []);
+      setIntegrations(i ?? []);
+      setActivity(n?.notifications ?? []);
+      setLoading(false);
+    });
+  }, []);
+
+  const activeConnections = integrations.reduce((sum: number, a: any) =>
+    sum + (a.google_ads?.connected ? 1 : 0) + (a.meta_ads?.connected ? 1 : 0), 0);
+  const failingCount = integrations.filter((a: any) => a.last_sync_error).length;
+  const activeUsers = users.filter((u: any) => u.is_active).length;
+
+  const KPIS = [
+    { label: "Total Users",    value: loading ? "—" : String(users.length),      change: "—", direction: "flat" as const, icon: "group",      accent: "indigo"  as const },
+    { label: "Active Users",   value: loading ? "—" : String(activeUsers),       change: "—", direction: "flat" as const, icon: "how_to_reg", accent: "emerald" as const },
+    { label: "Integrations",   value: loading ? "—" : String(activeConnections), change: failingCount > 0 ? `${failingCount} failing` : "Healthy", direction: failingCount > 0 ? "down" as const : "flat" as const, icon: "cable", accent: "blue" as const },
+    { label: "Sync Failures",  value: loading ? "—" : String(failingCount),      change: "—", direction: failingCount > 0 ? "down" as const : "flat" as const, icon: "gpp_maybe", accent: "rose" as const },
+  ];
+
   return (
     <>
       <PageHeader
@@ -60,19 +94,23 @@ export default function AdminOverviewPage() {
 
         <Card className="p-card-padding">
           <CardHeader title="Recent Activity" icon="history" />
-          <ul className="space-y-4">
-            {ACTIVITY.map((a, i) => (
-              <li key={i} className="flex items-start gap-3">
-                <span className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center ${a.tone}`}>
-                  <Icon name={a.icon} className="text-[16px]" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-body-sm text-on-surface">{a.text}</p>
-                  <p className="text-label-md text-on-surface-variant">{a.time}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
+          {activity.length === 0 ? (
+            <p className="text-body-sm text-on-surface-variant py-4 text-center">No recent activity.</p>
+          ) : (
+            <ul className="space-y-4">
+              {activity.slice(0, 6).map((a: any) => (
+                <li key={a.id} className="flex items-start gap-3">
+                  <span className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center ${LEVEL_TONE[a.level] ?? LEVEL_TONE.info}`}>
+                    <Icon name={LEVEL_ICON[a.level] ?? "info"} className="text-[16px]" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-body-sm text-on-surface">{a.title}</p>
+                    <p className="text-label-md text-on-surface-variant">{timeAgo(a.created_at)}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       </div>
     </>

@@ -1,11 +1,11 @@
 import { clsx } from "@/lib/clsx";
 import { Icon } from "./Icon";
 
-type CardProps = { children: React.ReactNode; className?: string };
+type CardProps = { children: React.ReactNode; className?: string; id?: string };
 
-export function Card({ children, className }: CardProps) {
+export function Card({ children, className, id }: CardProps) {
   return (
-    <div className={clsx("bg-white border border-outline-variant rounded-[14px] elevation-card transition-all duration-200", className)}>
+    <div id={id} className={clsx("bg-surface-bright border border-outline-variant rounded-[14px] elevation-card transition-all duration-200", className)}>
       {children}
     </div>
   );
