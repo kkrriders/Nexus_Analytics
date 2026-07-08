@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
@@ -151,7 +151,7 @@ export default function LiveCreatives() {
     </div>
   );
 
-  const campaignOptions = useMemo(() => Array.from(new Set(creatives.map((c) => c.campaign).filter(Boolean))), [creatives]);
+  const campaignOptions = Array.from(new Set(creatives.map((c) => c.campaign).filter(Boolean)));
 
   const toggle = (set: Set<string>, value: string, setter: (s: Set<string>) => void) => {
     const next = new Set(set);
