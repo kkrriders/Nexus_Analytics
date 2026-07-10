@@ -72,7 +72,7 @@ export default function LiveSpend() {
     </div>
   );
 
-  if (loading) return (
+  if (loading || !data) return (
     <div className="flex items-center justify-center h-64 gap-3">
       <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
       <span className="text-on-surface-variant text-[14px]">Loading spend data…</span>
