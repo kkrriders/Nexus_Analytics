@@ -14,6 +14,7 @@ export const workspaceNav: NavItem[] = [
   { label: "Creative Analytics", href: "/creative-analytics", icon: "palette", group: "MENU" },
   { label: "Trend Forecasting", href: "/trend-forecasting", icon: "auto_graph", group: "INTELLIGENCE" },
   { label: "AI Recommendations", href: "/ai-recommendations", icon: "psychology", group: "INTELLIGENCE" },
+  { label: "Budget Optimizer", href: "/budget-optimizer", icon: "savings", group: "INTELLIGENCE" },
 ];
 
 export const utilityNav: NavItem[] = [

@@ -3,10 +3,12 @@ import time
 import httpx
 from collections import defaultdict, deque
 from datetime import date
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from pipeline import run_pipeline, build_audience_data, build_creative_data, build_spend_analytics, _DEVICE_LABELS
-from models.schemas import DashboardData, AudienceData, KeywordData, CreativeData, SpendAnalytics
+from models.schemas import DashboardData, AudienceData, KeywordData, CreativeData, SpendAnalytics, BudgetOptimizerData
+from optimization.budget_optimizer import build_budget_optimizer
 from auth import require_admin, get_current_user
 from database.postgres_client import query as pg_query, execute as pg_execute
 from database.clickhouse_client import is_connected
@@ -85,6 +87,25 @@ async def get_dashboard(days: int = Query(30, ge=7, le=90), user: dict = Depends
 async def get_campaigns(days: int = Query(30, ge=7, le=90), user: dict = Depends(get_current_user)):
     """Campaign list with metrics, health, and history for Campaign Analytics page."""
     return run_pipeline(await _account_id_for(user), days=days).campaigns
+
+
+@router.get("/budget-optimizer", response_model=BudgetOptimizerData)
+async def get_budget_optimizer(
+    total_budget: Optional[float] = Query(default=None, gt=0),
+    days: int = Query(30, ge=7, le=90),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Where spend is underperforming this account's own best campaign, and how a
+    (real or hypothetical) budget should be split for the best real-ROAS return.
+    Uses the same campaigns/metrics as Campaign Analytics (real data once
+    connected, the shared demo dataset otherwise) — no separate data source.
+    """
+    dashboard = run_pipeline(await _account_id_for(user), days=days)
+    data = build_budget_optimizer(dashboard.campaigns, total_budget=total_budget)
+    if data is None:
+        raise HTTPException(status_code=404, detail="No active campaigns to optimize yet.")
+    return data
 
 
 @router.get("/spend", response_model=SpendAnalytics)

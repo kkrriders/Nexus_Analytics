@@ -42,6 +42,8 @@ export const fetchKeywords        = () => fetchJSON('/api/keywords');
 export const fetchCreatives       = () => fetchJSON('/api/creatives');
 export const fetchSpendAnalytics  = () => fetchJSON('/api/spend');
 export const syncAccount          = () => postJSON('/api/accounts/sync');
+export const fetchBudgetOptimizer = (totalBudget?: number) =>
+  fetchJSON(`/api/budget-optimizer${totalBudget ? `?total_budget=${totalBudget}` : ''}`);
 
 export const fetchNotifications         = () => fetchJSON('/api/notifications');
 export const markNotificationRead       = (id: string) => postJSON(`/api/notifications/${id}/read`);

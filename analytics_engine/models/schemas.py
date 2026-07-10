@@ -254,6 +254,41 @@ class KeywordData(BaseModel):
     last_updated: str
 
 
+# ── Budget Optimizer ───────────────────────────────────────────────────────────
+# Every number here is arithmetic on this account's own real campaign metrics —
+# no fitted curves, no industry-average assumptions, nothing invented.
+
+class MisallocatedSpend(BaseModel):
+    campaign_id: str
+    campaign_name: str
+    platform: Platform
+    spend: float
+    roas: float
+    best_roas: float             # this account's own best-performing active campaign
+    opportunity_cost: float      # spend * (best_roas - roas) — real, derived, not a guess
+
+
+class BudgetAllocation(BaseModel):
+    campaign_id: str
+    campaign_name: str
+    platform: Platform
+    current_spend: float
+    roas: float
+    suggested_spend: float
+    projected_revenue: float     # suggested_spend * roas
+
+
+class BudgetOptimizerData(BaseModel):
+    total_budget: float
+    misallocated: List[MisallocatedSpend]
+    total_opportunity_cost: float
+    allocation: List[BudgetAllocation]
+    current_revenue_at_budget: float   # what this budget earns spent as it is today
+    projected_revenue: float           # what it would earn under the suggested allocation
+    projected_uplift: float            # projected_revenue - current_revenue_at_budget
+    last_updated: str
+
+
 # ── Spend Analytics (all-time) ────────────────────────────────────────────────
 
 class SpendDayPoint(BaseModel):
