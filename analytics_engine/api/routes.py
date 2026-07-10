@@ -5,12 +5,12 @@ from collections import defaultdict, deque
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from pipeline import run_pipeline, build_audience_data, build_creative_data, _DEVICE_LABELS
-from models.schemas import DashboardData, AudienceData, KeywordData, CreativeData
+from pipeline import run_pipeline, build_audience_data, build_creative_data, build_spend_analytics, _DEVICE_LABELS
+from models.schemas import DashboardData, AudienceData, KeywordData, CreativeData, SpendAnalytics
 from auth import require_admin, get_current_user
 from database.postgres_client import query as pg_query, execute as pg_execute
 from database.clickhouse_client import is_connected
-from database.clickhouse_schema import has_real_ads, has_real_breakdowns, read_real_breakdown
+from database.clickhouse_schema import has_real_ads, has_real_breakdowns, has_real_campaigns, read_real_breakdown
 from ai.chat_engine import answer as chat_answer
 from notifications import create_notification
 
@@ -85,6 +85,16 @@ async def get_dashboard(days: int = Query(30, ge=7, le=90), user: dict = Depends
 async def get_campaigns(days: int = Query(30, ge=7, le=90), user: dict = Depends(get_current_user)):
     """Campaign list with metrics, health, and history for Campaign Analytics page."""
     return run_pipeline(await _account_id_for(user), days=days).campaigns
+
+
+@router.get("/spend", response_model=SpendAnalytics)
+async def get_spend_analytics(user: dict = Depends(get_current_user)):
+    """All-time spend across every day ever ingested — not bounded by the 7/30/90-day picker."""
+    account_id = await _account_id_for(user)
+    data = build_spend_analytics(account_id) if (is_connected() and account_id and has_real_campaigns(account_id)) else None
+    if data is None:
+        raise HTTPException(status_code=404, detail="No spend data yet — connect an ad account and sync it in Settings.")
+    return data
 
 
 @router.get("/campaigns/{campaign_id}/device-breakdown")

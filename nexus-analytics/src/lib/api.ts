@@ -40,6 +40,7 @@ export const fetchForecasts       = (days?: number) => fetchJSON(`/api/forecasts
 export const fetchAudience        = () => fetchJSON('/api/audience');
 export const fetchKeywords        = () => fetchJSON('/api/keywords');
 export const fetchCreatives       = () => fetchJSON('/api/creatives');
+export const fetchSpendAnalytics  = () => fetchJSON('/api/spend');
 
 export const fetchNotifications         = () => fetchJSON('/api/notifications');
 export const markNotificationRead       = (id: string) => postJSON(`/api/notifications/${id}/read`);

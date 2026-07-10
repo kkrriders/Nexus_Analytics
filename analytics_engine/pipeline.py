@@ -29,6 +29,7 @@ from models.schemas import (
     DashboardData, KPISet, KPIChanges, ProcessedCampaign,
     PlatformSummary, Platform, DerivedMetrics, Recommendation,
     Campaign, CampaignStatus, RawMetrics, CreativeData, AudienceData,
+    SpendAnalytics, SpendDayPoint, CampaignSpend, PlatformSpend,
 )
 from preprocessing.mock_generator import (
     BASE_CAMPAIGNS, current_window_seed,
@@ -50,7 +51,6 @@ from database.clickhouse_schema import (
     read_breakdown_daily_totals, read_targeted_interests,
     MOCK_ACCOUNT_ID,
 )
-from ai.deepseek_client import enrich_recommendations
 from integrations.meta_ads import sync_if_stale
 
 logger = logging.getLogger(__name__)
@@ -89,18 +89,6 @@ def _row_to_point(row: dict) -> dict:
     }
 
 
-def _raw_from_row(row: dict | None) -> RawMetrics:
-    if not row:
-        return RawMetrics(impressions=0, clicks=0, spend=0, revenue=0, conversions=0)
-    return RawMetrics(
-        impressions=int(row.get("impressions", 0)),
-        clicks=int(row.get("clicks", 0)),
-        spend=float(row.get("spend", 0)),
-        revenue=float(row.get("revenue", 0)),
-        conversions=int(row.get("conversions", 0)),
-    )
-
-
 def _load_real_campaigns(account_id: str):
     """
     Load real ingested ad-account data from ClickHouse for one specific
@@ -116,8 +104,6 @@ def _load_real_campaigns(account_id: str):
 
     campaigns: list[Campaign] = []
     history_map: dict[str, list[dict]] = {}
-    raw_current: dict[str, RawMetrics] = {}
-    raw_prev: dict[str, RawMetrics] = {}
     sparkline_map: dict[str, list[float]] = {}
 
     for row in camp_rows:
@@ -136,19 +122,27 @@ def _load_real_campaigns(account_id: str):
         points = [_row_to_point(r) for r in daily_rows]
         history_map[cid] = points
 
-        raw_current[cid] = _raw_from_row(daily_rows[-1] if daily_rows else None)
-        raw_prev[cid]    = _raw_from_row(daily_rows[-2] if len(daily_rows) >= 2 else None)
-
         sp = [p["revenue"] for p in points[-12:]]
         sparkline_map[cid] = sp * 2 if len(sp) == 1 else sp
 
     return {
         "campaigns": campaigns,
         "history": history_map,
-        "raw_current": raw_current,
-        "raw_prev": raw_prev,
         "sparkline": sparkline_map,
     }
+
+
+def _sum_raw(points: list[dict]) -> RawMetrics:
+    """Sum a window of daily points into one RawMetrics — powers days-scoped KPI totals."""
+    if not points:
+        return RawMetrics(impressions=0, clicks=0, spend=0, revenue=0, conversions=0)
+    return RawMetrics(
+        impressions=sum(p["impressions"] for p in points),
+        clicks=sum(p["clicks"] for p in points),
+        spend=round(sum(p["spend"] for p in points), 2),
+        revenue=round(sum(p["revenue"] for p in points), 2),
+        conversions=sum(p["conversions"] for p in points),
+    )
 
 
 def _aggregate_real_history(history_map: dict[str, list[dict]], days: int = 30) -> list[dict]:
@@ -205,11 +199,17 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardD
     using_real = real is not None
     cache_key = account_id if using_real else MOCK_ACCOUNT_ID
 
-    # ── 1. Generate / fetch raw metrics ──────────────────────────────────────
+    # ── 1. Generate / fetch raw metrics — real accounts sum over the selected
+    #      `days` window so totals actually change with the date-range picker,
+    #      instead of always reflecting a single day. ─────────────────────────
     campaigns_list = real["campaigns"] if using_real else BASE_CAMPAIGNS
     if using_real:
-        raw_current = real["raw_current"]
-        raw_prev    = real["raw_prev"]
+        raw_current: dict[str, RawMetrics] = {}
+        raw_prev: dict[str, RawMetrics] = {}
+        for c in campaigns_list:
+            pts = real["history"][c.id]
+            raw_current[c.id] = _sum_raw(pts[-days:])
+            raw_prev[c.id]    = _sum_raw(pts[-2 * days:-days] if len(pts) >= 2 * days else [])
     else:
         raw_current = {c.id: generate_raw_metrics(c.id, window_seed) for c in campaigns_list}
         raw_prev    = {c.id: generate_prev_raw_metrics(c.id)         for c in campaigns_list}
@@ -297,7 +297,6 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardD
     )
 
     # ── 6. Write processed data to ClickHouse ────────────────────────────────
-    platform_by_id = {c.id: c.platform.value for c in campaigns_list}
     raw_recs = generate_all_recommendations(processed)
 
     if ch_active:
@@ -305,10 +304,12 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardD
         write_kpi_snapshot(kpis, window_seed, cache_key)
         write_alerts(alerts, window_seed, cache_key)
 
-    # ── 7. Recommendations — numbers are always rule-computed from real metrics;
-    #      DeepSeek (if configured) only rewrites description text, never numbers.
+    # ── 7. Recommendations — always the rule-based text as-is. It already states
+    #      real computed numbers; no LLM rewrite step, so nothing can turn a real
+    #      number into a placeholder like "$X" or "Z".
     if ch_active:
-        # Check ClickHouse cache first — avoid recalling DeepSeek every request
+        # Check ClickHouse cache first so identical requests within the same
+        # 5-minute window don't recompute — cheap, but keeps behavior consistent.
         stored = read_latest_recommendations(window_seed, cache_key)
         if stored:
             recommendations = [
@@ -331,26 +332,10 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardD
             ]
             logger.info("Serving %d cached recommendations from ClickHouse (window=%s)", len(recommendations), window_seed)
         else:
-            rule_rec_dicts = [
-                {**r.model_dump(), "platform": platform_by_id.get(r.campaign_id, "")}
-                for r in raw_recs
-            ]
-            enriched = enrich_recommendations(rule_rec_dicts)
-            recommendations = [
-                Recommendation(**{k: v for k, v in d.items() if k != "platform"})
-                for d in enriched
-            ]
+            recommendations = raw_recs
             write_ai_recommendations(recommendations, window_seed, cache_key)
     else:
-        rec_dicts = [
-            {**r.model_dump(), "platform": platform_by_id.get(r.campaign_id, "")}
-            for r in raw_recs
-        ]
-        enriched = enrich_recommendations(rec_dicts)
-        recommendations = [
-            Recommendation(**{k: v for k, v in d.items() if k != "platform"})
-            for d in enriched
-        ]
+        recommendations = raw_recs
 
     # ── 8. Platform summaries ─────────────────────────────────────────────────
     platform_data: dict[Platform, dict] = {}
@@ -563,3 +548,88 @@ def build_audience_data(account_id: str) -> Optional[AudienceData]:
 
 def clicks_to_pct(numerator: int, denominator: int) -> float:
     return round(numerator / denominator * 100, 2) if denominator > 0 else 0.0
+
+
+# ── Spend Analytics — all-time spend, built from every ingested day, no date-range cap ──
+
+def build_spend_analytics(account_id: str) -> Optional[SpendAnalytics]:
+    """All-time spend/revenue across every campaign ever ingested for this account."""
+    campaigns = read_real_campaigns(account_id)
+    if not campaigns:
+        return None
+
+    daily_totals: dict[str, dict] = {}
+    by_campaign: list[dict] = []
+    platform_totals: dict[str, dict] = {}
+
+    for c in campaigns:
+        history = read_real_campaign_history(account_id, c["id"])
+        camp_spend = camp_rev = 0.0
+        for h in history:
+            d = h["date"].isoformat() if hasattr(h["date"], "isoformat") else str(h["date"])
+            spend, revenue, conv = float(h["spend"]), float(h["revenue"]), int(h["conversions"])
+            camp_spend += spend
+            camp_rev += revenue
+            day = daily_totals.setdefault(d, {"spend": 0.0, "revenue": 0.0, "conversions": 0})
+            day["spend"] += spend
+            day["revenue"] += revenue
+            day["conversions"] += conv
+
+        platform = c["platform"]
+        p = platform_totals.setdefault(platform, {"spend": 0.0, "revenue": 0.0})
+        p["spend"] += camp_spend
+        p["revenue"] += camp_rev
+
+        if camp_spend > 0:
+            by_campaign.append({
+                "campaign_id": c["id"], "campaign_name": c["name"], "platform": platform,
+                "spend": round(camp_spend, 2), "revenue": round(camp_rev, 2),
+            })
+
+    if not daily_totals:
+        return None
+
+    sorted_dates = sorted(daily_totals.keys())
+    total_spend = sum(d["spend"] for d in daily_totals.values())
+    total_revenue = sum(d["revenue"] for d in daily_totals.values())
+    total_conversions = sum(d["conversions"] for d in daily_totals.values())
+    highest_day = max(sorted_dates, key=lambda d: daily_totals[d]["spend"])
+
+    def _label(d: str) -> str:
+        try:
+            dt = datetime.strptime(d, "%Y-%m-%d")
+            return f"{dt.strftime('%b')} {dt.day}"
+        except ValueError:
+            return d
+
+    daily_series = [
+        SpendDayPoint(date=d, label=_label(d), spend=round(daily_totals[d]["spend"], 2), revenue=round(daily_totals[d]["revenue"], 2))
+        for d in sorted_dates
+    ]
+
+    by_campaign.sort(key=lambda c: -c["spend"])
+
+    by_platform = []
+    for plat, totals in platform_totals.items():
+        meta = PLATFORM_META.get(Platform(plat), dict(display_name=plat.replace("_", " ").title(), color="#94A3B8"))
+        by_platform.append(PlatformSpend(
+            platform=Platform(plat), display_name=meta["display_name"], color=meta["color"],
+            spend=round(totals["spend"], 2), revenue=round(totals["revenue"], 2),
+        ))
+    by_platform.sort(key=lambda p: -p.spend)
+
+    return SpendAnalytics(
+        total_spend_all_time=round(total_spend, 2),
+        total_revenue_all_time=round(total_revenue, 2),
+        total_conversions_all_time=total_conversions,
+        blended_roas_all_time=round(total_revenue / total_spend, 2) if total_spend > 0 else 0.0,
+        tracking_since=sorted_dates[0],
+        days_tracked=len(sorted_dates),
+        avg_daily_spend=round(total_spend / len(sorted_dates), 2) if sorted_dates else 0.0,
+        highest_spend_day=highest_day,
+        highest_spend_day_amount=round(daily_totals[highest_day]["spend"], 2),
+        daily_series=daily_series,
+        by_campaign=[CampaignSpend(**c) for c in by_campaign],
+        by_platform=by_platform,
+        last_updated=datetime.now(timezone.utc).isoformat() + "Z",
+    )

@@ -254,6 +254,47 @@ class KeywordData(BaseModel):
     last_updated: str
 
 
+# ── Spend Analytics (all-time) ────────────────────────────────────────────────
+
+class SpendDayPoint(BaseModel):
+    date: str
+    label: str
+    spend: float
+    revenue: float
+
+
+class CampaignSpend(BaseModel):
+    campaign_id: str
+    campaign_name: str
+    platform: str
+    spend: float
+    revenue: float
+
+
+class PlatformSpend(BaseModel):
+    platform: Platform
+    display_name: str
+    color: str
+    spend: float
+    revenue: float
+
+
+class SpendAnalytics(BaseModel):
+    total_spend_all_time: float
+    total_revenue_all_time: float
+    total_conversions_all_time: int
+    blended_roas_all_time: float
+    tracking_since: str
+    days_tracked: int
+    avg_daily_spend: float
+    highest_spend_day: str
+    highest_spend_day_amount: float
+    daily_series: List[SpendDayPoint]
+    by_campaign: List[CampaignSpend]
+    by_platform: List[PlatformSpend]
+    last_updated: str
+
+
 # ── Creative Analytics ─────────────────────────────────────────────────────────
 
 class CreativeMetric(BaseModel):
