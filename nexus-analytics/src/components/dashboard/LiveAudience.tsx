@@ -28,6 +28,9 @@ export default function LiveAudience() {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
 
+  const { googleConnected, metaConnected, loading: connLoading } = useAccountConnections();
+  const connected = googleConnected || metaConnected;
+
   const load = useCallback(async () => {
     try {
       setLoading(true); setError(null);
@@ -39,9 +42,13 @@ export default function LiveAudience() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Don't even hit the API until we know an ad account is connected — avoids
+  // firing a request that can only ever 404 for accounts with nothing connected.
+  useEffect(() => {
+    if (connLoading || !connected) { setLoading(false); return; }
+    load();
+  }, [connLoading, connected, load]);
 
-  const { googleConnected, metaConnected, loading: connLoading } = useAccountConnections();
   if (connLoading) return null;
   if (!googleConnected && !metaConnected) return (
     <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">

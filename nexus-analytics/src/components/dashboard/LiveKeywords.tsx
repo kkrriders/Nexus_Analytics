@@ -40,6 +40,8 @@ export default function LiveKeywords() {
   const [error, setError]     = useState<string | null>(null);
   const [campaignFilter, setCampaignFilter] = useState("All Campaigns");
 
+  const { googleConnected, loading: connLoading } = useAccountConnections();
+
   const load = useCallback(async () => {
     try {
       setLoading(true); setError(null);
@@ -51,9 +53,13 @@ export default function LiveKeywords() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Don't even hit the API until we know Google Ads is connected — avoids
+  // firing a request that can only ever 404 for accounts with nothing connected.
+  useEffect(() => {
+    if (connLoading || !googleConnected) { setLoading(false); return; }
+    load();
+  }, [connLoading, googleConnected, load]);
 
-  const { googleConnected, loading: connLoading } = useAccountConnections();
   if (connLoading) return null;
   if (!googleConnected) return (
     <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">
