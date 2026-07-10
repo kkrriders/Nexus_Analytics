@@ -10,12 +10,15 @@ import { clsx } from "@/lib/clsx";
 import { fetchForecasts } from "@/lib/api";
 import { useDashboardPrefs } from "@/lib/dashboardPrefs";
 import { fmt } from "@/lib/format";
+import { useAccountConnections } from "@/lib/useAccountConnections";
 
 export default function LiveForecasting() {
   const [data, setData]       = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
   const { days } = useDashboardPrefs();
+  const { googleConnected, metaConnected, loading: connLoading } = useAccountConnections();
+  const connected = googleConnected || metaConnected;
 
   const load = useCallback(async () => {
     try {
@@ -28,7 +31,23 @@ export default function LiveForecasting() {
     }
   }, [days]);
 
-  useEffect(() => { load(); }, [load]);
+  // Don't even hit the API until we know an ad account is connected — avoids
+  // firing a request that can only ever 404 for accounts with nothing connected.
+  useEffect(() => {
+    if (connLoading || !connected) { setLoading(false); return; }
+    load();
+  }, [connLoading, connected, load]);
+
+  if (connLoading) return null;
+  if (!connected) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">
+      <Icon name="auto_graph" className="text-[40px] text-outline" />
+      <p className="text-on-surface font-semibold">Connect an ad account for forecasts</p>
+      <p className="text-on-surface-variant text-[13px] max-w-md">
+        Connect a Google Ads or Meta Ads account in Settings — there&apos;s nothing to forecast until then.
+      </p>
+    </div>
+  );
 
   if (loading) return (
     <div className="flex items-center justify-center h-64 gap-3">
@@ -38,9 +57,13 @@ export default function LiveForecasting() {
   );
   if (error) return (
     <div className="flex flex-col items-center justify-center h-64 gap-4">
-      <Icon name="error_outline" className="text-[40px] text-error" />
-      <p className="text-on-surface font-semibold">Analytics engine not reachable</p>
-      <p className="text-on-surface-variant text-[13px]">{error}</p>
+      <Icon name={error.includes("404") ? "sync_problem" : "error_outline"} className="text-[40px] text-error" />
+      <p className="text-on-surface font-semibold">
+        {error.includes("404") ? "No data synced yet" : "Analytics engine not reachable"}
+      </p>
+      <p className="text-on-surface-variant text-[13px]">
+        {error.includes("404") ? "Sync your connected account in Settings, then refresh." : error}
+      </p>
       <Button variant="primary" icon="refresh" onClick={load}>Retry</Button>
     </div>
   );

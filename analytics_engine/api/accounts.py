@@ -142,7 +142,7 @@ async def ingest_account_data(account_id: str, body: IngestBody):
     """
     n8n posts normalized Google/Meta campaign data here after each fetch.
     Persists the real campaign rows into ClickHouse so the dashboard pipeline
-    can read live data instead of the mock demo pipeline.
+    has real data to read for this account.
     """
     account_rows = pg_query("SELECT user_id FROM public.accounts WHERE id = %(id)s", {"id": account_id})
     if not account_rows:

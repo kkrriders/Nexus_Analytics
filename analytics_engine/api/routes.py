@@ -43,6 +43,17 @@ async def _account_id_for(user: dict) -> str | None:
     return rows[0]["id"] if rows else None
 
 
+NOT_CONNECTED_DETAIL = "No connected ad account yet — connect one in Settings to see your data."
+
+
+async def _require_dashboard(user: dict, days: int = 30) -> DashboardData:
+    """run_pipeline() result, or a 404 — there is no synthetic fallback."""
+    data = run_pipeline(await _account_id_for(user), days=days)
+    if data is None:
+        raise HTTPException(status_code=404, detail=NOT_CONNECTED_DETAIL)
+    return data
+
+
 def _recommendation_actions(user_id: str) -> dict[tuple[str, str], str]:
     """Map of (campaign_id, rec_type) -> 'approved'|'rejected' for this user's past decisions."""
     rows = pg_query(
@@ -71,7 +82,7 @@ def _apply_recommendation_actions(recommendations: list, user_id: str) -> list:
 @router.get("/dashboard", response_model=DashboardData)
 async def get_dashboard(days: int = Query(30, ge=7, le=90), user: dict = Depends(get_current_user)):
     """Full dashboard payload — KPIs, campaigns, alerts, recommendations, forecasts."""
-    data = run_pipeline(await _account_id_for(user), days=days)
+    data = await _require_dashboard(user, days=days)
     data.recommendations = _apply_recommendation_actions(data.recommendations, user["id"])
 
     for alert in data.alerts:
@@ -86,7 +97,7 @@ async def get_dashboard(days: int = Query(30, ge=7, le=90), user: dict = Depends
 @router.get("/campaigns")
 async def get_campaigns(days: int = Query(30, ge=7, le=90), user: dict = Depends(get_current_user)):
     """Campaign list with metrics, health, and history for Campaign Analytics page."""
-    return run_pipeline(await _account_id_for(user), days=days).campaigns
+    return (await _require_dashboard(user, days=days)).campaigns
 
 
 @router.get("/budget-optimizer", response_model=BudgetOptimizerData)
@@ -98,10 +109,9 @@ async def get_budget_optimizer(
     """
     Where spend is underperforming this account's own best campaign, and how a
     (real or hypothetical) budget should be split for the best real-ROAS return.
-    Uses the same campaigns/metrics as Campaign Analytics (real data once
-    connected, the shared demo dataset otherwise) — no separate data source.
+    Uses the same campaigns/metrics as Campaign Analytics — no separate data source.
     """
-    dashboard = run_pipeline(await _account_id_for(user), days=days)
+    dashboard = await _require_dashboard(user, days=days)
     data = build_budget_optimizer(dashboard.campaigns, total_budget=total_budget)
     if data is None:
         raise HTTPException(status_code=404, detail="No active campaigns to optimize yet.")
@@ -141,7 +151,7 @@ async def get_campaign_device_breakdown(campaign_id: str, user: dict = Depends(g
 @router.get("/recommendations")
 async def get_recommendations(user: dict = Depends(get_current_user)):
     """AI recommendations list plus aggregate KPIs (used by AI Recommendations page)."""
-    data = run_pipeline(await _account_id_for(user))
+    data = await _require_dashboard(user)
     recs = _apply_recommendation_actions(data.recommendations, user["id"])
     return {"recommendations": recs, "kpis": data.kpis}
 
@@ -175,7 +185,7 @@ async def act_on_recommendation(body: RecommendationActionBody, user: dict = Dep
 @router.get("/forecasts")
 async def get_forecasts(days: int = Query(30, ge=7, le=90), user: dict = Depends(get_current_user)):
     """Metric forecasts + aggregated trend history (used by Trend Forecasting page)."""
-    data = run_pipeline(await _account_id_for(user), days=days)
+    data = await _require_dashboard(user, days=days)
     return {"forecasts": data.forecasts, "trend_history": data.trend_history, "kpis": data.kpis}
 
 
@@ -218,7 +228,8 @@ class ChatBody(BaseModel):
 async def chat(body: ChatBody, user: dict = Depends(get_current_user)):
     """Dashboard chatbot — rule-based against live data first, DeepSeek fallback for anything else."""
     _check_chat_rate_limit(user["id"])
-    return chat_answer(body.message, run_pipeline(await _account_id_for(user)))
+    data = await _require_dashboard(user)
+    return chat_answer(body.message, data)
 
 
 @router.get("/admin/users")

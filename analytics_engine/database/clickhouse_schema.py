@@ -11,10 +11,9 @@ logger = logging.getLogger(__name__)
 
 # ─── DDL ─────────────────────────────────────────────────────────────────────
 
-# account_id is "__mock__" for the shared demo/mock data path (safe to share
-# across every user with no connected account) and a real accounts.id UUID
-# for ingested data — every table and query below is scoped by it so one
-# user's connected ad account is never visible to another user's requests.
+# account_id is always a real accounts.id UUID — every table and query below
+# is scoped by it so one user's connected ad account is never visible to
+# another user's requests. There is no shared/demo account id.
 
 _TABLES = {
     "nexus.campaigns": """
@@ -190,9 +189,6 @@ _TABLES = {
     """,
 }
 
-MOCK_ACCOUNT_ID = "__mock__"
-
-
 def _existing_tables() -> set[str]:
     """Return the set of tables that already exist in the nexus database."""
     try:
@@ -230,7 +226,7 @@ def create_tables() -> bool:
 
 # ─── Pipeline write helpers ───────────────────────────────────────────────────
 
-def write_processed_metrics(processed_campaigns, window_seed: int, account_id: str = MOCK_ACCOUNT_ID) -> None:
+def write_processed_metrics(processed_campaigns, window_seed: int, account_id: str) -> None:
     """Persist derived metrics + health + trend for every campaign."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     rows = []
@@ -262,7 +258,7 @@ def write_processed_metrics(processed_campaigns, window_seed: int, account_id: s
         logger.info("Wrote %d processed_metrics rows (window=%s)", len(rows), window_seed)
 
 
-def write_kpi_snapshot(kpis, window_seed: int, account_id: str = MOCK_ACCOUNT_ID) -> None:
+def write_kpi_snapshot(kpis, window_seed: int, account_id: str) -> None:
     """Persist aggregate KPIs for this pipeline window."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     insert("nexus.kpi_snapshots", [{
@@ -281,7 +277,7 @@ def write_kpi_snapshot(kpis, window_seed: int, account_id: str = MOCK_ACCOUNT_ID
     logger.info("Wrote KPI snapshot (window=%s)", window_seed)
 
 
-def write_alerts(alerts, window_seed: int, account_id: str = MOCK_ACCOUNT_ID) -> None:
+def write_alerts(alerts, window_seed: int, account_id: str) -> None:
     """Persist anomaly alerts for this pipeline window."""
     if not alerts:
         return
@@ -302,7 +298,7 @@ def write_alerts(alerts, window_seed: int, account_id: str = MOCK_ACCOUNT_ID) ->
         logger.info("Wrote %d alerts (window=%s)", len(rows), window_seed)
 
 
-def write_ai_recommendations(recommendations, window_seed: int, account_id: str = MOCK_ACCOUNT_ID) -> None:
+def write_ai_recommendations(recommendations, window_seed: int, account_id: str) -> None:
     """Persist AI-generated recommendations for this pipeline window."""
     if not recommendations:
         return
@@ -329,7 +325,7 @@ def write_ai_recommendations(recommendations, window_seed: int, account_id: str 
         logger.info("Wrote %d AI recommendations (window=%s)", len(rows), window_seed)
 
 
-def read_latest_recommendations(window_seed: int, account_id: str = MOCK_ACCOUNT_ID) -> list[dict]:
+def read_latest_recommendations(window_seed: int, account_id: str) -> list[dict]:
     """Read AI recommendations for the current window from ClickHouse."""
     rows = ch_query(
         "SELECT * FROM nexus.ai_recommendations WHERE window_seed = {ws:UInt64} AND account_id = {aid:String} ORDER BY confidence DESC",

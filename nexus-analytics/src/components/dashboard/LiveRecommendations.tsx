@@ -8,6 +8,7 @@ import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
 import { fetchRecommendations, sendRecommendationAction } from "@/lib/api";
 import { fmt } from "@/lib/format";
+import { useAccountConnections } from "@/lib/useAccountConnections";
 
 type Priority = "high" | "medium" | "low";
 
@@ -141,6 +142,9 @@ export default function LiveRecommendations() {
   const [busyIds, setBusyIds]   = useState<Set<string>>(new Set());
   const [applyingAll, setApplyingAll] = useState(false);
 
+  const { googleConnected, metaConnected, loading: connLoading } = useAccountConnections();
+  const connected = googleConnected || metaConnected;
+
   const load = useCallback(async () => {
     try {
       setLoading(true); setError(null);
@@ -152,7 +156,12 @@ export default function LiveRecommendations() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Don't even hit the API until we know an ad account is connected — avoids
+  // firing a request that can only ever 404 for accounts with nothing connected.
+  useEffect(() => {
+    if (connLoading || !connected) { setLoading(false); return; }
+    load();
+  }, [connLoading, connected, load]);
 
   const setRecStatus = useCallback((rec: any, action: "approved" | "rejected") => {
     setData((prev: any) => {
@@ -207,6 +216,17 @@ export default function LiveRecommendations() {
     }
   }, []);
 
+  if (connLoading) return null;
+  if (!connected) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">
+      <Icon name="psychology" className="text-[40px] text-outline" />
+      <p className="text-on-surface font-semibold">Connect an ad account for AI recommendations</p>
+      <p className="text-on-surface-variant text-[13px] max-w-md">
+        Connect a Google Ads or Meta Ads account in Settings — there&apos;s nothing to analyze until then.
+      </p>
+    </div>
+  );
+
   if (loading) return (
     <div className="flex items-center justify-center h-64 gap-3">
       <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -215,9 +235,13 @@ export default function LiveRecommendations() {
   );
   if (error) return (
     <div className="flex flex-col items-center justify-center h-64 gap-4">
-      <Icon name="error_outline" className="text-[40px] text-error" />
-      <p className="text-on-surface font-semibold">Analytics engine not reachable</p>
-      <p className="text-on-surface-variant text-[13px]">{error}</p>
+      <Icon name={error.includes("404") ? "sync_problem" : "error_outline"} className="text-[40px] text-error" />
+      <p className="text-on-surface font-semibold">
+        {error.includes("404") ? "No data synced yet" : "Analytics engine not reachable"}
+      </p>
+      <p className="text-on-surface-variant text-[13px]">
+        {error.includes("404") ? "Sync your connected account in Settings, then refresh." : error}
+      </p>
       <Button variant="primary" icon="refresh" onClick={load}>Retry</Button>
     </div>
   );

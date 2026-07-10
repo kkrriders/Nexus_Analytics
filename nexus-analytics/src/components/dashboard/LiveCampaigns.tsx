@@ -11,6 +11,7 @@ import { fetchCampaigns, fetchCampaignDeviceBreakdown } from "@/lib/api";
 import { PLATFORM_OPTIONS, useDashboardPrefs } from "@/lib/dashboardPrefs";
 import { exportToCsv } from "@/lib/csv";
 import { fmt } from "@/lib/format";
+import { useAccountConnections } from "@/lib/useAccountConnections";
 
 type Status = "active" | "paused" | "review" | "draft";
 const ALL_STATUSES: Status[] = ["active", "paused", "review", "draft"];
@@ -51,12 +52,25 @@ function LoadingState() {
 }
 
 function ErrorState({ msg, retry }: { msg: string; retry: () => void }) {
+  const notSynced = msg.includes("404");
   return (
     <div className="flex flex-col items-center justify-center h-64 gap-4">
-      <Icon name="error_outline" className="text-[40px] text-error" />
-      <p className="text-on-surface font-semibold">Analytics engine not reachable</p>
-      <p className="text-on-surface-variant text-[13px]">{msg}</p>
+      <Icon name={notSynced ? "sync_problem" : "error_outline"} className="text-[40px] text-error" />
+      <p className="text-on-surface font-semibold">{notSynced ? "No data synced yet" : "Analytics engine not reachable"}</p>
+      <p className="text-on-surface-variant text-[13px]">{notSynced ? "Sync your connected account in Settings, then refresh." : msg}</p>
       <Button variant="primary" icon="refresh" onClick={retry}>Retry</Button>
+    </div>
+  );
+}
+
+function NotConnectedState() {
+  return (
+    <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">
+      <Icon name="analytics" className="text-[40px] text-outline" />
+      <p className="text-on-surface font-semibold">Connect an ad account to see Campaign Analytics</p>
+      <p className="text-on-surface-variant text-[13px] max-w-md">
+        Connect a Google Ads or Meta Ads account in Settings — there&apos;s nothing to show until then.
+      </p>
     </div>
   );
 }
@@ -111,6 +125,8 @@ function LiveCampaignsInner() {
   const [audienceFilter, setAudienceFilter] = useState<Set<string>>(new Set());
   const [visibleCols, setVisibleCols] = useState<Set<ColumnKey>>(new Set(["cpa", "roas", "health"]));
   const [openFilter, setOpenFilter] = useState<"platform" | "status" | "audience" | "columns" | null>(null);
+  const { googleConnected, metaConnected, loading: connLoading } = useAccountConnections();
+  const connected = googleConnected || metaConnected;
 
   const load = useCallback(async () => {
     try {
@@ -125,7 +141,12 @@ function LiveCampaignsInner() {
     }
   }, [days]);
 
-  useEffect(() => { load(); }, [load]);
+  // Don't even hit the API until we know an ad account is connected — avoids
+  // firing a request that can only ever 404 for accounts with nothing connected.
+  useEffect(() => {
+    if (connLoading || !connected) { setLoading(false); return; }
+    load();
+  }, [connLoading, connected, load]);
 
   const audiences = useMemo(
     () => Array.from(new Set(campaigns.map((c) => c.campaign?.target_audience).filter(Boolean))),
@@ -166,6 +187,8 @@ function LiveCampaignsInner() {
       .catch(() => setDeviceBreakdown([]));
   }, [selectedCampaignId]);
 
+  if (connLoading) return null;
+  if (!connected) return <NotConnectedState />;
   if (loading) return <LoadingState />;
   if (error)   return <ErrorState msg={error} retry={load} />;
 

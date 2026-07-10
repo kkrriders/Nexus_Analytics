@@ -1,24 +1,22 @@
 """
 Main analytics pipeline — orchestrates all engine modules.
 
-Data flow (ClickHouse connected):
-  mock_generator / ClickHouse raw data
+Data flow:
+  ClickHouse (real ingested ad-account data)
     → feature_engineering
     → campaign_health_score
     → trend_detection
     → anomaly_detection
     → write processed_metrics, alerts, KPI snapshot → ClickHouse
-    → DeepSeek reads ClickHouse → generates recommendations
+    → rule-based recommendation engine (DeepSeek, if configured, only rewrites
+      description text afterward — it never generates numbers)
     → write ai_recommendations → ClickHouse
     → forecasting
-    → DashboardData response (reads from ClickHouse where available)
-
-Data flow (ClickHouse NOT connected):
-  mock_generator
-    → feature_engineering → health → trend → anomaly
-    → DeepSeek enriches rule-based recommendation descriptions
-    → forecasting
     → DashboardData response
+
+There is no synthetic/demo fallback: run_pipeline() returns None whenever the
+requesting user hasn't connected and synced a real ad account, and every route
+that calls it surfaces that as "connect an account" (404), never fake data.
 """
 import time
 import logging
@@ -30,11 +28,6 @@ from models.schemas import (
     PlatformSummary, Platform, DerivedMetrics, Recommendation,
     Campaign, CampaignStatus, RawMetrics, CreativeData, AudienceData,
     SpendAnalytics, SpendDayPoint, CampaignSpend, PlatformSpend,
-)
-from preprocessing.mock_generator import (
-    BASE_CAMPAIGNS, current_window_seed,
-    generate_raw_metrics, generate_prev_raw_metrics,
-    generate_daily_history, generate_aggregated_history, generate_sparkline,
 )
 from analytics.feature_engineering import compute_derived, pct_change
 from scoring.campaign_health_score import compute_health, _score_factor, BENCHMARKS
@@ -49,9 +42,15 @@ from database.clickhouse_schema import (
     has_real_campaigns, read_real_campaigns, read_real_campaign_history,
     read_real_ads, read_real_ad_history, read_real_breakdown,
     read_breakdown_daily_totals, read_targeted_interests,
-    MOCK_ACCOUNT_ID,
 )
 from integrations.meta_ads import sync_if_stale
+
+
+def current_window_seed() -> int:
+    """5-minute window index — increments every 5 minutes; used to cache
+    recommendations/KPI snapshots so identical requests within the same
+    window don't recompute."""
+    return int(time.time() // (5 * 60))
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +92,8 @@ def _load_real_campaigns(account_id: str):
     """
     Load real ingested ad-account data from ClickHouse for one specific
     account. Returns None when that account has no ad account connected/
-    synced yet (caller should fall back to mock).
+    synced yet — the caller (run_pipeline) surfaces that as "not connected",
+    never synthetic data.
     """
     if not has_real_campaigns(account_id):
         return None
@@ -178,41 +178,38 @@ def _aggregate_real_history(history_map: dict[str, list[dict]], days: int = 30) 
     return agg
 
 
-def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardData:
+def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> Optional[DashboardData]:
     """
-    account_id identifies the requesting user's own connected ad account
-    (None if they haven't connected one). All real-data reads/writes and the
-    recommendation/KPI/alert cache are scoped to it so one user's connected
-    account is never visible to another user's request.
+    account_id identifies the requesting user's own connected ad account.
+    Returns None when there's no real, synced ad account yet — every caller
+    must surface that as "connect an account", never fall back to synthetic
+    data. All real-data reads/writes and the recommendation/KPI/alert cache
+    are scoped to account_id so one user's connected account is never visible
+    to another user's request.
 
     `days` bounds how much history feeds the trend charts and each campaign's
-    history series (7/30/90 — the TopNav date-range selector); it does not
-    change the KPI totals, which always reflect the current pipeline window.
+    history series (7/30/90 — the TopNav date-range selector), and also bounds
+    the KPI totals themselves, which are summed over that window.
     """
+    if not (is_connected() and account_id):
+        return None
+
+    sync_if_stale(account_id)
+    real = _load_real_campaigns(account_id)
+    if real is None:
+        return None
+
     window_seed = current_window_seed()
-    ch_active = is_connected()
+    campaigns_list = real["campaigns"]
 
-    if ch_active and account_id:
-        sync_if_stale(account_id)
-
-    real = _load_real_campaigns(account_id) if (ch_active and account_id) else None
-    using_real = real is not None
-    cache_key = account_id if using_real else MOCK_ACCOUNT_ID
-
-    # ── 1. Generate / fetch raw metrics — real accounts sum over the selected
-    #      `days` window so totals actually change with the date-range picker,
-    #      instead of always reflecting a single day. ─────────────────────────
-    campaigns_list = real["campaigns"] if using_real else BASE_CAMPAIGNS
-    if using_real:
-        raw_current: dict[str, RawMetrics] = {}
-        raw_prev: dict[str, RawMetrics] = {}
-        for c in campaigns_list:
-            pts = real["history"][c.id]
-            raw_current[c.id] = _sum_raw(pts[-days:])
-            raw_prev[c.id]    = _sum_raw(pts[-2 * days:-days] if len(pts) >= 2 * days else [])
-    else:
-        raw_current = {c.id: generate_raw_metrics(c.id, window_seed) for c in campaigns_list}
-        raw_prev    = {c.id: generate_prev_raw_metrics(c.id)         for c in campaigns_list}
+    # ── 1. Raw metrics summed over the selected `days` window, so totals
+    #      actually change with the date-range picker. ───────────────────────
+    raw_current: dict[str, RawMetrics] = {}
+    raw_prev: dict[str, RawMetrics] = {}
+    for c in campaigns_list:
+        pts = real["history"][c.id]
+        raw_current[c.id] = _sum_raw(pts[-days:])
+        raw_prev[c.id]    = _sum_raw(pts[-2 * days:-days] if len(pts) >= 2 * days else [])
 
     # ── 2. Feature engineering ────────────────────────────────────────────────
     derived_current = {c.id: compute_derived(raw_current[c.id], c.budget) for c in campaigns_list}
@@ -227,12 +224,8 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardD
         current = derived_current[cid]
         prev    = derived_prev[cid]
         health  = compute_health(current, campaign.platform)
-        if using_real:
-            history = real["history"][cid][-days:]
-            sparkl  = real["sparkline"][cid]
-        else:
-            history = generate_daily_history(cid, days=days)
-            sparkl  = generate_sparkline(cid, "revenue", 12)
+        history = real["history"][cid][-days:]
+        sparkl  = real["sparkline"][cid]
         revenue_series = [pt["revenue"] for pt in history] if history else [0]
         trend  = detect_trend(revenue_series)
 
@@ -299,43 +292,39 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardD
     # ── 6. Write processed data to ClickHouse ────────────────────────────────
     raw_recs = generate_all_recommendations(processed)
 
-    if ch_active:
-        write_processed_metrics(processed_campaigns, window_seed, cache_key)
-        write_kpi_snapshot(kpis, window_seed, cache_key)
-        write_alerts(alerts, window_seed, cache_key)
+    write_processed_metrics(processed_campaigns, window_seed, account_id)
+    write_kpi_snapshot(kpis, window_seed, account_id)
+    write_alerts(alerts, window_seed, account_id)
 
     # ── 7. Recommendations — always the rule-based text as-is. It already states
     #      real computed numbers; no LLM rewrite step, so nothing can turn a real
-    #      number into a placeholder like "$X" or "Z".
-    if ch_active:
-        # Check ClickHouse cache first so identical requests within the same
-        # 5-minute window don't recompute — cheap, but keeps behavior consistent.
-        stored = read_latest_recommendations(window_seed, cache_key)
-        if stored:
-            recommendations = [
-                Recommendation(
-                    id=str(r["id"]),
-                    campaign_id=str(r["campaign_id"]),
-                    campaign_name=str(r["campaign_name"]),
-                    type=str(r["type"]),
-                    title=str(r["title"]),
-                    description=str(r["description"]),
-                    roas_impact=float(r["roas_impact"]),
-                    revenue_impact=float(r["revenue_impact"]),
-                    cpa_impact=float(r["cpa_impact"]),
-                    revenue_impact_dollars=float(r.get("revenue_impact_dollars", 0)),
-                    cpa_impact_dollars=float(r.get("cpa_impact_dollars", 0)),
-                    confidence=float(r["confidence"]),
-                    priority=str(r["priority"]),
-                )
-                for r in stored
-            ]
-            logger.info("Serving %d cached recommendations from ClickHouse (window=%s)", len(recommendations), window_seed)
-        else:
-            recommendations = raw_recs
-            write_ai_recommendations(recommendations, window_seed, cache_key)
+    #      number into a placeholder like "$X" or "Z". Check ClickHouse cache
+    #      first so identical requests within the same 5-minute window don't
+    #      recompute — cheap, but keeps behavior consistent.
+    stored = read_latest_recommendations(window_seed, account_id)
+    if stored:
+        recommendations = [
+            Recommendation(
+                id=str(r["id"]),
+                campaign_id=str(r["campaign_id"]),
+                campaign_name=str(r["campaign_name"]),
+                type=str(r["type"]),
+                title=str(r["title"]),
+                description=str(r["description"]),
+                roas_impact=float(r["roas_impact"]),
+                revenue_impact=float(r["revenue_impact"]),
+                cpa_impact=float(r["cpa_impact"]),
+                revenue_impact_dollars=float(r.get("revenue_impact_dollars", 0)),
+                cpa_impact_dollars=float(r.get("cpa_impact_dollars", 0)),
+                confidence=float(r["confidence"]),
+                priority=str(r["priority"]),
+            )
+            for r in stored
+        ]
+        logger.info("Serving %d cached recommendations from ClickHouse (window=%s)", len(recommendations), window_seed)
     else:
         recommendations = raw_recs
+        write_ai_recommendations(recommendations, window_seed, account_id)
 
     # ── 8. Platform summaries ─────────────────────────────────────────────────
     platform_data: dict[Platform, dict] = {}
@@ -369,7 +358,7 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardD
     platforms.sort(key=lambda p: p.spend, reverse=True)
 
     # ── 9. Forecasting ────────────────────────────────────────────────────────
-    agg_history = _aggregate_real_history(real["history"], days=days) if using_real else generate_aggregated_history(days=days)
+    agg_history = _aggregate_real_history(real["history"], days=days)
     forecasts   = build_forecasts(agg_history)
 
     # ── 10. Metadata ──────────────────────────────────────────────────────────

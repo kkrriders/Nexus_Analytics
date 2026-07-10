@@ -51,6 +51,7 @@ export function ChatWidget() {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ message: question }),
       });
+      if (res.status === 404) throw new Error("Connect a Google Ads or Meta Ads account in Settings first — I don't have any data to answer from yet.");
       if (!res.ok) throw new Error(`Assistant request failed (${res.status})`);
       const data = await res.json();
       setMessages((m) => [...m, { role: "assistant", text: data.reply }]);
