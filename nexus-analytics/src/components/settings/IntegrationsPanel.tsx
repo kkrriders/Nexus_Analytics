@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
 import { createClient } from "@/lib/supabase/client";
+import { syncAccount } from "@/lib/api";
 
 type Account = {
   id: string;
@@ -54,29 +56,43 @@ function PlatformRow({ label, letter, color, connected }: { label: string; lette
 export function IntegrationsPanel() {
   const [account, setAccount] = useState<Account | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-  useEffect(() => {
-    (async () => {
-      const supabase = createClient();
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) {
-        setAccount(null);
-        return;
-      }
-      try {
-        const res = await fetch(`${apiUrl}/api/accounts/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error(`Request failed (${res.status})`);
-        setAccount(await res.json());
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load account status.");
-        setAccount(null);
-      }
-    })();
+  const loadAccount = useCallback(async () => {
+    const supabase = createClient();
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) {
+      setAccount(null);
+      return;
+    }
+    try {
+      const res = await fetch(`${apiUrl}/api/accounts/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      setAccount(await res.json());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load account status.");
+      setAccount(null);
+    }
   }, [apiUrl]);
+
+  useEffect(() => { loadAccount(); }, [loadAccount]);
+
+  const handleSync = useCallback(async () => {
+    setSyncing(true); setSyncError(null);
+    try {
+      await syncAccount();
+      await loadAccount();
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : "Sync failed.");
+    } finally {
+      setSyncing(false);
+    }
+  }, [loadAccount]);
 
   return (
     <Card className="p-card-padding">
@@ -123,16 +139,28 @@ export function IntegrationsPanel() {
             <span className="flex items-center gap-1">
               <Icon name="schedule" className="text-[16px]" /> Last synced {timeAgo(account.last_synced_at)}
             </span>
-            <span
-              className={clsx(
-                "inline-flex items-center gap-1",
-                account.subscription_status === "active" ? "text-tertiary" : "text-on-surface-variant",
-              )}
-            >
-              <span className={clsx("w-1.5 h-1.5 rounded-full", account.subscription_status === "active" ? "bg-tertiary" : "bg-outline")} />
-              {account.subscription_status === "active" ? "Subscription active" : account.subscription_status}
-            </span>
+            <div className="flex items-center gap-3">
+              <span
+                className={clsx(
+                  "inline-flex items-center gap-1",
+                  account.subscription_status === "active" ? "text-tertiary" : "text-on-surface-variant",
+                )}
+              >
+                <span className={clsx("w-1.5 h-1.5 rounded-full", account.subscription_status === "active" ? "bg-tertiary" : "bg-outline")} />
+                {account.subscription_status === "active" ? "Subscription active" : account.subscription_status}
+              </span>
+              <Button icon="sync" onClick={handleSync} disabled={syncing}>
+                {syncing ? "Syncing…" : "Sync Now"}
+              </Button>
+            </div>
           </div>
+
+          {syncError && (
+            <div className="flex items-start gap-2 bg-error-container/40 text-on-error-container border border-error/20 rounded-lg p-3 mt-3 text-body-sm">
+              <Icon name="error" className="text-[18px] mt-0.5" />
+              <span>Sync failed: {syncError}</span>
+            </div>
+          )}
 
           {account.last_sync_error && (
             <div className="flex items-start gap-2 bg-error-container/40 text-on-error-container border border-error/20 rounded-lg p-3 mt-3 text-body-sm">
