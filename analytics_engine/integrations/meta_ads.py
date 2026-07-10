@@ -104,7 +104,7 @@ def fetch_meta_ads(access_token: str, account_id: str) -> list[dict]:
 # Account-wide breakdown dimensions that power Audience Analytics.
 # Meta's Insights `breakdowns` param returns one extra field per row named
 # after the breakdown itself (e.g. "age", "device_platform", "country").
-BREAKDOWN_FIELDS = {"age": "age", "device_platform": "device_platform", "country": "country"}
+BREAKDOWN_FIELDS = {"age": "age", "device_platform": "device_platform", "country": "country", "region": "region"}
 
 
 def fetch_meta_breakdown(access_token: str, account_id: str, breakdown: str, campaign_id: Optional[str] = None) -> list[dict]:

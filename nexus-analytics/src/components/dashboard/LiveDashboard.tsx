@@ -33,6 +33,27 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Deterministic, real-number narrative — same discipline as the recommendation
+ * engine: fixed templates filled from real deltas, never an invented figure. */
+function buildNarrative(kpis: any, changes: any, best: any, worst: any): string {
+  if (!kpis) return "";
+  const parts: string[] = [];
+  const revChange = changes?.revenue_change ?? 0;
+  const spendChange = changes?.spend_change ?? 0;
+
+  if (Math.abs(revChange) >= 1) {
+    let s = `Revenue ${revChange >= 0 ? "grew" : "fell"} ${Math.abs(revChange).toFixed(1)}% this period`;
+    if (Math.abs(spendChange) >= 1) s += `, while spend ${spendChange >= 0 ? "rose" : "dropped"} ${Math.abs(spendChange).toFixed(1)}%`;
+    parts.push(s + ".");
+  } else {
+    parts.push(`Revenue held steady this period at ₹${(kpis.total_revenue / 1000).toFixed(1)}K.`);
+  }
+  if (best) parts.push(`"${best.campaign?.name}" is your top performer at ${best.metrics?.roas?.toFixed(2)}x ROAS.`);
+  if (worst && (worst.health?.score ?? 100) < 60) parts.push(`"${worst.campaign?.name}" needs attention — health score ${Math.round(worst.health.score)}/100.`);
+
+  return parts.join(" ");
+}
+
 type Sev = "critical" | "warning" | "info";
 const SEV_STYLE: Record<Sev, { dot: string; badge: string; label: string }> = {
   critical: { dot: "bg-error",    badge: "bg-[#FEF2F2] text-[#991B1B]", label: "Critical" },
@@ -152,25 +173,32 @@ export default function LiveDashboard() {
   const forecasts = data?.forecasts ?? [];
   const history = data?.trend_history ?? [];
 
+  const activeCampaigns = (data?.campaigns ?? []).filter((c: any) => ["active", "review"].includes(c.campaign?.status));
+  const bestCampaign = activeCampaigns.length > 0
+    ? activeCampaigns.reduce((a: any, b: any) => (b.metrics?.roas ?? 0) > (a.metrics?.roas ?? 0) ? b : a) : null;
+  const worstCampaign = activeCampaigns.length > 0
+    ? activeCampaigns.reduce((a: any, b: any) => (b.health?.score ?? 100) < (a.health?.score ?? 100) ? b : a) : null;
+  const narrative = buildNarrative(kpis, changes, bestCampaign, worstCampaign);
+
   // ── KPI cards ─────────────────────────────────────────────────────────────
   type Dir = "up" | "down" | "flat";
   const d = (n: number, inverse = false): Dir => ((n >= 0) !== inverse) ? "up" : "down";
   const KPI_ROWS = [
-    { label:"Total Spend",    value:`₹${(kpis?.total_spend/1000).toFixed(1)}K`,  change:`${Math.abs(changes?.spend_change??0).toFixed(1)}%`,        direction:d(changes?.spend_change??0),         icon:"payments",        accent:"blue"    as const,
+    { label:"Total Spend",    value:`₹${(kpis?.total_spend/1000).toFixed(1)}K`,  change:`${Math.abs(changes?.spend_change??0).toFixed(1)}%`,        direction:d(changes?.spend_change??0),         icon:"payments",
       tooltip:"Total ad spend across all active campaigns in the selected period." },
-    { label:"Revenue",        value:`₹${(kpis?.total_revenue/1000).toFixed(1)}K`,change:`${Math.abs(changes?.revenue_change??0).toFixed(1)}%`,      direction:d(changes?.revenue_change??0),       icon:"trending_up",     accent:"emerald" as const,
+    { label:"Revenue",        value:`₹${(kpis?.total_revenue/1000).toFixed(1)}K`,change:`${Math.abs(changes?.revenue_change??0).toFixed(1)}%`,      direction:d(changes?.revenue_change??0),       icon:"trending_up",
       tooltip:"Total revenue attributed to conversions from these campaigns." },
-    { label:"ROAS",           value:`${kpis?.blended_roas?.toFixed(2)}x`,        change:`${Math.abs(changes?.roas_change??0).toFixed(1)}%`,         direction:d(changes?.roas_change??0),          icon:"show_chart",      accent:"indigo"  as const,
+    { label:"ROAS",           value:`${kpis?.blended_roas?.toFixed(2)}x`,        change:`${Math.abs(changes?.roas_change??0).toFixed(1)}%`,         direction:d(changes?.roas_change??0),          icon:"show_chart",
       tooltip:"Return On Ad Spend — revenue earned for every ₹1 spent. 3.0x means ₹3 back per ₹1 spent." },
-    { label:"CPA",            value:`₹${kpis?.average_cpa?.toFixed(2)}`,         change:`${Math.abs(changes?.cpa_change??0).toFixed(1)}%`,          direction:d(changes?.cpa_change??0, true),     icon:"target",          accent:"amber"   as const,
+    { label:"CPA",            value:`₹${kpis?.average_cpa?.toFixed(2)}`,         change:`${Math.abs(changes?.cpa_change??0).toFixed(1)}%`,          direction:d(changes?.cpa_change??0, true),     icon:"target",
       tooltip:"Cost Per Acquisition — average amount spent to get one conversion. Lower is better." },
-    { label:"CTR",            value:`${kpis?.average_ctr?.toFixed(2)}%`,         change:`${Math.abs(changes?.ctr_change??0).toFixed(1)}%`,          direction:d(changes?.ctr_change??0),           icon:"ads_click",       accent:"cyan"    as const,
+    { label:"CTR",            value:`${kpis?.average_ctr?.toFixed(2)}%`,         change:`${Math.abs(changes?.ctr_change??0).toFixed(1)}%`,          direction:d(changes?.ctr_change??0),           icon:"ads_click",
       tooltip:"Click-Through Rate — the % of people who saw an ad and clicked it." },
-    { label:"Conversions",    value:(kpis?.total_conversions??0).toLocaleString(),change:`${Math.abs(changes?.conversions_change??0).toFixed(1)}%`, direction:d(changes?.conversions_change??0),   icon:"check_circle",    accent:"purple"  as const,
+    { label:"Conversions",    value:(kpis?.total_conversions??0).toLocaleString(),change:`${Math.abs(changes?.conversions_change??0).toFixed(1)}%`, direction:d(changes?.conversions_change??0),   icon:"check_circle",
       tooltip:"Total completed goal actions (purchases, signups, etc.) from these campaigns." },
-    { label:"Profit",         value:`₹${(kpis?.total_profit/1000).toFixed(1)}K`, change:`${Math.abs(changes?.profit_change??0).toFixed(1)}%`,       direction:d(changes?.profit_change??0),        icon:"account_balance", accent:"emerald" as const,
+    { label:"Profit",         value:`₹${(kpis?.total_profit/1000).toFixed(1)}K`, change:`${Math.abs(changes?.profit_change??0).toFixed(1)}%`,       direction:d(changes?.profit_change??0),        icon:"account_balance",
       tooltip:"Revenue minus ad spend — what these campaigns actually made after costs." },
-    { label:"AI Health Score",value:`${kpis?.ai_health_score?.toFixed(0)}/100`,  change:`${Math.abs(changes?.health_score_change??0).toFixed(1)} pts`,direction:d(changes?.health_score_change??0),icon:"psychology",      accent:"purple"  as const,
+    { label:"AI Health Score",value:`${kpis?.ai_health_score?.toFixed(0)}/100`,  change:`${Math.abs(changes?.health_score_change??0).toFixed(1)} pts`,direction:d(changes?.health_score_change??0),icon:"psychology",
       tooltip:"A single 0-100 score blending CTR, ROAS, CPA, conversion rate, and budget use against platform benchmarks." },
   ];
 
@@ -229,6 +257,36 @@ export default function LiveDashboard() {
           <Button variant="primary" icon="refresh" size="sm" onClick={load}>Refresh</Button>
         </div>
       </div>
+
+      {/* ── At a glance — one real sentence + best/worst spotlight ─────────── */}
+      {narrative && (
+        <div className="bg-primary-container/10 border border-primary/20 rounded-xl p-5 flex flex-col md:flex-row md:items-center gap-4">
+          <Icon name="auto_awesome" className="text-primary text-[22px] shrink-0" />
+          <p className="text-body-md text-on-surface flex-1">{narrative}</p>
+          {(bestCampaign || worstCampaign) && (
+            <div className="flex gap-3 shrink-0">
+              {bestCampaign && (
+                <div className="flex items-center gap-2 bg-surface-bright border border-outline-variant/50 rounded-lg px-3 py-2">
+                  <Icon name="trending_up" className="text-tertiary text-[16px]" />
+                  <div>
+                    <p className="text-[11px] text-on-surface-variant leading-tight">Top performer</p>
+                    <p className="text-[13px] font-semibold text-on-surface leading-tight truncate max-w-[140px]">{bestCampaign.campaign?.name}</p>
+                  </div>
+                </div>
+              )}
+              {worstCampaign && (worstCampaign.health?.score ?? 100) < 60 && (
+                <div className="flex items-center gap-2 bg-surface-bright border border-outline-variant/50 rounded-lg px-3 py-2">
+                  <Icon name="trending_down" className="text-error text-[16px]" />
+                  <div>
+                    <p className="text-[11px] text-on-surface-variant leading-tight">Needs attention</p>
+                    <p className="text-[13px] font-semibold text-on-surface leading-tight truncate max-w-[140px]">{worstCampaign.campaign?.name}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Section 1: KPIs ──────────────────────────────────────────────── */}
       <div>

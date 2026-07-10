@@ -83,6 +83,7 @@ export default function LiveAudience() {
   const ageBars:    any[] = data?.age_groups       ?? [];
   const devices:    any[] = data?.device_split      ?? [];
   const geoRows:    any[] = data?.geo_distribution  ?? [];
+  const regionRows: any[] = data?.region_distribution ?? [];
   const interests:  string[] = data?.targeted_interests ?? [];
   const reach:      number = data?.total_unique_reach_m ?? 0;
   const quality:    number = data?.audience_quality_score ?? 0;
@@ -247,20 +248,24 @@ export default function LiveAudience() {
             <span className="text-label-caps text-on-surface-variant uppercase bg-surface-container px-2 py-1 rounded">Last 30 days</span>
           </div>
 
-          {/* Map placeholder */}
-          <div className="relative bg-surface-container-low/40 h-44 flex items-center justify-center overflow-hidden border-b border-outline-variant/30">
-            <div className="absolute inset-0 opacity-10 pointer-events-none"
-              style={{ backgroundImage: "linear-gradient(var(--color-outline-variant) 1px, transparent 1px), linear-gradient(90deg, var(--color-outline-variant) 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
-            <div className="relative flex flex-col items-center gap-2">
-              <Icon name="map" className="text-[56px] text-on-surface-variant opacity-20" />
-              <span className="text-label-caps text-on-surface-variant opacity-50 uppercase tracking-wider">Interactive World Map</span>
-            </div>
-            {[{ top:"30%", left:"22%", code:"US" },{ top:"28%", left:"47%", code:"UK" },{ top:"32%", left:"56%", code:"DE" },{ top:"50%", left:"78%", code:"AU" },{ top:"27%", left:"18%", code:"CA" }].map((p) => (
-              <div key={p.code} className="absolute flex flex-col items-center" style={{ top: p.top, left: p.left }}>
-                <div className="w-2.5 h-2.5 rounded-full bg-primary border-2 border-on-primary shadow-md" />
-                <span className="text-[9px] font-bold text-primary mt-0.5 bg-surface-container-lowest/80 px-0.5 rounded leading-none">{p.code}</span>
+          {/* Top regions/states — real breakdown, replaces the old decorative map */}
+          <div className="p-card-padding border-b border-outline-variant/30 bg-surface-container-low/20">
+            <p className="text-label-caps text-on-surface-variant uppercase tracking-wider mb-3">Top Regions</p>
+            {regionRows.length === 0 ? (
+              <p className="text-body-sm text-on-surface-variant">No region-level data synced yet.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                {regionRows.slice(0, 8).map((r: any) => (
+                  <div key={r.region} className="flex items-center gap-3">
+                    <span className="text-body-sm text-on-surface w-28 shrink-0 truncate">{r.region}</span>
+                    <div className="flex-1 h-1.5 bg-surface-variant rounded-full overflow-hidden">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${r.pct}%` }} />
+                    </div>
+                    <span className="text-label-md text-on-surface-variant tabular-nums w-10 text-right">{r.pct.toFixed(1)}%</span>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
 
           <div className="overflow-x-auto custom-scrollbar">

@@ -1,30 +1,20 @@
 import { clsx } from "@/lib/clsx";
 import { Icon } from "./Icon";
 
-export type AccentColor = "indigo" | "blue" | "emerald" | "amber" | "rose" | "purple" | "cyan";
-
-const ACCENT: Record<AccentColor, { bg: string; text: string; bar: string; glow: string }> = {
-  indigo:  { bg: "bg-[#EEF2FF]", text: "text-[#4F46E5]", bar: "#4F46E5", glow: "rgba(79,70,229,0.15)"  },
-  blue:    { bg: "bg-[#EFF6FF]", text: "text-[#2563EB]", bar: "#2563EB", glow: "rgba(37,99,235,0.15)"  },
-  emerald: { bg: "bg-[#ECFDF5]", text: "text-[#10B981]", bar: "#10B981", glow: "rgba(16,185,129,0.15)" },
-  amber:   { bg: "bg-[#FFFBEB]", text: "text-[#F59E0B]", bar: "#F59E0B", glow: "rgba(245,158,11,0.15)" },
-  rose:    { bg: "bg-[#FEF2F2]", text: "text-[#EF4444]", bar: "#EF4444", glow: "rgba(239,68,68,0.15)"  },
-  purple:  { bg: "bg-[#F5F3FF]", text: "text-[#7C3AED]", bar: "#7C3AED", glow: "rgba(124,58,237,0.15)" },
-  cyan:    { bg: "bg-[#ECFEFF]", text: "text-[#06B6D4]", bar: "#06B6D4", glow: "rgba(6,182,212,0.15)"  },
-};
-
 type KpiCardProps = {
   label: string;
   value: string;
   change: string;
   direction: "up" | "down" | "flat";
   icon: string;
-  accent?: AccentColor;
   tooltip?: string;
 };
 
-export function KpiCard({ label, value, change, direction, icon, accent = "indigo", tooltip }: KpiCardProps) {
-  const a = ACCENT[accent];
+// Icon chip is intentionally one neutral color across every tile — 8 unrelated
+// metrics (spend, ROAS, CTR, health...) sharing a decorative rainbow of hues
+// carries no real meaning and reads as a template. Color is reserved for the
+// delta badge below, where it actually means something (up=good/down=bad).
+export function KpiCard({ label, value, change, direction, icon, tooltip }: KpiCardProps) {
   const isUp = direction === "up", isDown = direction === "down";
   const changeColor = isUp ? "text-[#10B981]" : isDown ? "text-[#EF4444]" : "text-on-surface-variant";
   const changeBg   = isUp ? "bg-[#ECFDF5]"  : isDown ? "bg-[#FEF2F2]"  : "bg-surface-container";
@@ -35,8 +25,8 @@ export function KpiCard({ label, value, change, direction, icon, accent = "indig
       <div className="p-5">
         {/* Top row */}
         <div className="flex items-center justify-between mb-4">
-          <div className={clsx("w-10 h-10 rounded-[10px] flex items-center justify-center", a.bg)}>
-            <Icon name={icon} className={clsx("text-[20px]", a.text)} />
+          <div className="w-10 h-10 rounded-[10px] flex items-center justify-center bg-surface-container-high">
+            <Icon name={icon} className="text-[20px] text-on-surface-variant" />
           </div>
           <span className={clsx("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold", changeBg, changeColor)}>
             <Icon name={arrow} className="text-[10px]" />

@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
-import { ComingSoon } from "@/components/ui/ComingSoon";
+import ScenarioPlanner from "@/components/dashboard/ScenarioPlanner";
 import { clsx } from "@/lib/clsx";
 import { fetchForecasts } from "@/lib/api";
 import { useDashboardPrefs } from "@/lib/dashboardPrefs";
@@ -192,11 +192,7 @@ export default function LiveForecasting() {
 
       {/* Scenario Planning */}
       <div className="pb-margin-desktop">
-        <ComingSoon
-          title="Scenario Planning"
-          description="Model budget allocation scenarios side-by-side and compare projected outcomes before committing spend. Powered by Monte Carlo simulation."
-          icon="schema"
-        />
+        <ScenarioPlanner />
       </div>
     </>
   );

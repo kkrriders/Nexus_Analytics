@@ -16,6 +16,30 @@ import { useAccountConnections } from "@/lib/useAccountConnections";
 type Status = "active" | "paused" | "review" | "draft";
 const ALL_STATUSES: Status[] = ["active", "paused", "review", "draft"];
 
+// Personalized benchmarking — this campaign's own real historical average,
+// alongside the platform-benchmark health score. Computed client-side from
+// the campaign's own already-fetched daily history, nothing invented.
+function ownHistoricalAverage(factorName: string, history: any[], budget: number): number | null {
+  if (!history || history.length === 0) return null;
+  let sum = 0, count = 0;
+  for (const pt of history) {
+    let v: number | null = null;
+    if (factorName === "CTR") v = pt.ctr;
+    else if (factorName === "ROAS") v = pt.roas;
+    else if (factorName === "CPA") v = pt.cpa;
+    else if (factorName === "Conversion Rate") v = pt.clicks > 0 ? (pt.conversions / pt.clicks) * 100 : null;
+    else if (factorName === "Budget Util.") v = budget > 0 ? (pt.spend / budget) * 100 : null;
+    if (v !== null && Number.isFinite(v)) { sum += v; count++; }
+  }
+  return count > 0 ? sum / count : null;
+}
+
+function formatFactorValue(factorName: string, v: number): string {
+  if (factorName === "ROAS") return `${v.toFixed(2)}x`;
+  if (factorName === "CPA") return `₹${v.toFixed(2)}`;
+  return `${v.toFixed(1)}%`;
+}
+
 const HEALTH_FACTOR_HINTS: Record<string, string> = {
   "CTR": "Click-Through Rate — % of people who saw the ad and clicked it.",
   "ROAS": "Return On Ad Spend — revenue earned per ₹1 spent.",
@@ -503,7 +527,9 @@ function LiveCampaignsInner() {
                   Health Factors
                 </h3>
                 <ul className="flex flex-col gap-3 text-body-sm text-on-surface-variant">
-                  {(selected.health?.factors ?? []).slice(0, 4).map((f: any) => (
+                  {(selected.health?.factors ?? []).slice(0, 4).map((f: any) => {
+                    const ownAvg = ownHistoricalAverage(f.name, selected.history ?? [], selected.campaign?.budget ?? 0);
+                    return (
                     <li key={f.name} className="flex items-center gap-3">
                       <span className={clsx("w-2 h-2 rounded-full shrink-0",
                         f.status === "good" ? "bg-tertiary" : f.status === "warning" ? "bg-warning" : "bg-error"
@@ -520,9 +546,13 @@ function LiveCampaignsInner() {
                             f.status === "good" ? "bg-tertiary" : f.status === "warning" ? "bg-warning" : "bg-error"
                           )} style={{ width: `${f.score}%` }} />
                         </div>
+                        {ownAvg !== null && (
+                          <p className="text-[10px] text-on-surface-variant mt-0.5">vs your own {formatFactorValue(f.name, ownAvg)} average</p>
+                        )}
                       </div>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </Card>
 

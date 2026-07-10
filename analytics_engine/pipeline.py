@@ -473,6 +473,7 @@ def build_audience_data(account_id: str) -> Optional[AudienceData]:
         return None
     device_rows = read_real_breakdown(account_id, "device_platform")
     country_rows = read_real_breakdown(account_id, "country")
+    region_rows = read_real_breakdown(account_id, "region")
     targeted = read_targeted_interests(account_id)
     daily_totals = read_breakdown_daily_totals(account_id, "age")
 
@@ -508,6 +509,16 @@ def build_audience_data(account_id: str) -> Optional[AudienceData]:
         for r in country_rows
     ], key=lambda g: -g["pct"])
 
+    total_region_impr = sum(int(r["impressions"]) for r in region_rows) or 1
+    region_distribution = sorted([
+        {
+            "region": str(r["breakdown_value"]),
+            "pct": round(int(r["impressions"]) / total_region_impr * 100, 1),
+            "reach_m": round(int(r["reach"]) / 1_000_000, 2),
+        }
+        for r in region_rows
+    ], key=lambda g: -g["pct"])[:15]  # long tail of small regions isn't worth showing
+
     ctr_total = clicks_to_pct(total_clicks, total_impr)
     conv_rate_total = clicks_to_pct(total_conv, total_clicks)
     bm = BENCHMARKS[Platform.meta_ads]
@@ -530,6 +541,7 @@ def build_audience_data(account_id: str) -> Optional[AudienceData]:
         age_groups=age_groups,
         device_split=device_split,
         geo_distribution=geo_distribution,
+        region_distribution=region_distribution,
         targeted_interests=sorted({str(r["interest"]) for r in targeted}),
         last_updated=datetime.now(timezone.utc).isoformat() + "Z",
     )

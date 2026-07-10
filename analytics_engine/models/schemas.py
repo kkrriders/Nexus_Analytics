@@ -214,6 +214,12 @@ class GeoRow(BaseModel):
     reach_m: float
 
 
+class RegionRow(BaseModel):
+    region: str
+    pct: float
+    reach_m: float
+
+
 class AudienceData(BaseModel):
     total_unique_reach_m: float
     primary_demographic: str
@@ -222,6 +228,7 @@ class AudienceData(BaseModel):
     age_groups: List[AgeGroup]
     device_split: List[DeviceSlice]
     geo_distribution: List[GeoRow]
+    region_distribution: List[RegionRow]
     targeted_interests: List[str]  # real ad-set targeting, not a guessed affinity score
     last_updated: str
 
