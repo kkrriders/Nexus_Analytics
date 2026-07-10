@@ -7,13 +7,21 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
-import { fetchCampaigns } from "@/lib/api";
+import { fetchCampaigns, fetchCampaignDeviceBreakdown } from "@/lib/api";
 import { PLATFORM_OPTIONS, useDashboardPrefs } from "@/lib/dashboardPrefs";
 import { exportToCsv } from "@/lib/csv";
 import { fmt } from "@/lib/format";
 
 type Status = "active" | "paused" | "review" | "draft";
 const ALL_STATUSES: Status[] = ["active", "paused", "review", "draft"];
+
+const HEALTH_FACTOR_HINTS: Record<string, string> = {
+  "CTR": "Click-Through Rate — % of people who saw the ad and clicked it.",
+  "ROAS": "Return On Ad Spend — revenue earned per ₹1 spent.",
+  "CPA": "Cost Per Acquisition — average spend to get one conversion.",
+  "Conversion Rate": "% of clicks that turned into a completed goal action.",
+  "Budget Util.": "% of the campaign's budget spent so far.",
+};
 
 const STATUS_STYLES: Record<Status, string> = {
   active: "bg-tertiary-fixed-dim/20 text-tertiary",
@@ -147,6 +155,17 @@ function LiveCampaignsInner() {
 
   const activeFilterCount = activePlatforms.size + statusFilter.size + audienceFilter.size + (search.trim() ? 1 : 0);
 
+  const selected = filtered.find((c) => c.campaign?.id === selectedId) ?? filtered[0];
+  const selectedCampaignId: string | undefined = selected?.campaign?.id;
+
+  const [deviceBreakdown, setDeviceBreakdown] = useState<{ label: string; pct: number }[]>([]);
+  useEffect(() => {
+    if (!selectedCampaignId) { setDeviceBreakdown([]); return; }
+    fetchCampaignDeviceBreakdown(selectedCampaignId)
+      .then((d) => setDeviceBreakdown(d?.devices ?? []))
+      .catch(() => setDeviceBreakdown([]));
+  }, [selectedCampaignId]);
+
   if (loading) return <LoadingState />;
   if (error)   return <ErrorState msg={error} retry={load} />;
 
@@ -161,14 +180,27 @@ function LiveCampaignsInner() {
   const blendedROAS = totalSpend > 0 ? totalRev / totalSpend : 0;
   const avgCPA      = totalConv  > 0 ? totalSpend / totalConv : 0;
 
-  const KPIS = [
-    { label: "Total Spend",      value: fmt(totalSpend, "currency"), delta: "+12.5%", dir: "up"   as const, icon: "payments" },
-    { label: "Total Impressions",value: fmt(totalImpr,  "number"),   delta: "+8.2%",  dir: "up"   as const, icon: "visibility" },
-    { label: "Average CPA",      value: fmt(avgCPA,     "currency"), delta: "-3.1%",  dir: "down" as const, icon: "target" },
-    { label: "Blended ROAS",     value: fmt(blendedROAS,"x"),        delta: "+1.2%",  dir: "up"   as const, icon: "monetization_on" },
-  ];
+  // Real vs-previous-period deltas from each campaign's own prev_metrics — no fabricated numbers.
+  const prevSpend = active.reduce((s: number, c: any) => s + (c.prev_metrics?.spend ?? 0), 0);
+  const prevImpr  = active.reduce((s: number, c: any) => s + (c.prev_metrics?.impressions ?? 0), 0);
+  const prevConv  = active.reduce((s: number, c: any) => s + (c.prev_metrics?.conversions ?? 0), 0);
+  const prevRev   = active.reduce((s: number, c: any) => s + (c.prev_metrics?.revenue ?? 0), 0);
+  const prevROAS  = prevSpend > 0 ? prevRev / prevSpend : 0;
+  const prevCPA   = prevConv  > 0 ? prevSpend / prevConv : 0;
+  const pctDelta = (cur: number, prev: number) => (prev === 0 ? 0 : ((cur - prev) / Math.abs(prev)) * 100);
+  const fmtDelta = (d: number) => `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`;
 
-  const selected = filtered.find((c) => c.campaign?.id === selectedId) ?? filtered[0];
+  const spendDelta = pctDelta(totalSpend, prevSpend);
+  const imprDelta  = pctDelta(totalImpr, prevImpr);
+  const cpaDelta   = pctDelta(avgCPA, prevCPA);
+  const roasDelta  = pctDelta(blendedROAS, prevROAS);
+
+  const KPIS = [
+    { label: "Total Spend",      value: fmt(totalSpend, "currency"), delta: fmtDelta(spendDelta), dir: (spendDelta >= 0 ? "up" : "down") as "up" | "down", icon: "payments" },
+    { label: "Total Impressions",value: fmt(totalImpr,  "number"),   delta: fmtDelta(imprDelta),  dir: (imprDelta  >= 0 ? "up" : "down") as "up" | "down", icon: "visibility" },
+    { label: "Average CPA",      value: fmt(avgCPA,     "currency"), delta: fmtDelta(cpaDelta),   dir: (cpaDelta   >= 0 ? "up" : "down") as "up" | "down", icon: "target" },
+    { label: "Blended ROAS",     value: fmt(blendedROAS,"x"),        delta: fmtDelta(roasDelta),  dir: (roasDelta  >= 0 ? "up" : "down") as "up" | "down", icon: "monetization_on" },
+  ];
 
   const openInNewTab = () => {
     if (!selected?.campaign?.id) return;
@@ -455,7 +487,7 @@ function LiveCampaignsInner() {
                       )} />
                       <div className="flex-1">
                         <div className="flex justify-between text-[12px] mb-0.5">
-                          <span className="font-medium text-on-surface">{f.name}</span>
+                          <span className="font-medium text-on-surface" title={HEALTH_FACTOR_HINTS[f.name] ?? undefined}>{f.name}</span>
                           <span className={clsx("font-bold",
                             f.status === "good" ? "text-tertiary" : f.status === "warning" ? "text-warning" : "text-error"
                           )}>{Math.round(f.score)}/100</span>
@@ -469,6 +501,28 @@ function LiveCampaignsInner() {
                     </li>
                   ))}
                 </ul>
+              </Card>
+
+              <Card className="p-card-padding">
+                <h3 className="text-label-md font-semibold text-on-surface mb-3 flex items-center gap-2">
+                  <Icon name="devices" className="text-[18px] text-on-surface-variant" />
+                  Device Breakdown
+                </h3>
+                {deviceBreakdown.length === 0 ? (
+                  <p className="text-body-sm text-on-surface-variant">No device data synced yet for this campaign.</p>
+                ) : (
+                  <ul className="flex flex-col gap-2.5">
+                    {deviceBreakdown.map((d) => (
+                      <li key={d.label} className="flex items-center gap-3">
+                        <span className="text-body-sm text-on-surface w-16 shrink-0">{d.label}</span>
+                        <div className="flex-1 h-1.5 bg-surface-variant rounded-full overflow-hidden">
+                          <div className="h-full rounded-full bg-primary" style={{ width: `${d.pct}%` }} />
+                        </div>
+                        <span className="text-label-md text-on-surface-variant tabular-nums w-10 text-right">{d.pct.toFixed(1)}%</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </Card>
             </>
           )}

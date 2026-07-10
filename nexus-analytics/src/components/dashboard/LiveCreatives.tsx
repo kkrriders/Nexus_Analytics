@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
 import { fetchCreatives } from "@/lib/api";
+import { useAccountConnections } from "@/lib/useAccountConnections";
 
 const TYPE_OPTIONS = ["image", "video", "carousel"];
 
@@ -136,6 +137,19 @@ export default function LiveCreatives() {
 
   useEffect(() => { load(); }, [load]);
 
+  const { googleConnected, metaConnected, loading: connLoading } = useAccountConnections();
+  if (connLoading) return null;
+  if (!googleConnected && !metaConnected) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">
+      <Icon name="palette" className="text-[40px] text-outline" />
+      <p className="text-on-surface font-semibold">Creative Analytics needs a connected ad account</p>
+      <p className="text-on-surface-variant text-[13px] max-w-md">
+        Connect a Google Ads or Meta Ads account in Settings to see real per-ad CTR and fatigue data —
+        there&apos;s nothing to show until then.
+      </p>
+    </div>
+  );
+
   if (loading) return (
     <div className="flex items-center justify-center h-64 gap-3">
       <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -144,9 +158,13 @@ export default function LiveCreatives() {
   );
   if (error) return (
     <div className="flex flex-col items-center justify-center h-64 gap-4">
-      <Icon name="error_outline" className="text-[40px] text-error" />
-      <p className="text-on-surface font-semibold">Analytics engine not reachable</p>
-      <p className="text-on-surface-variant text-[13px]">{error}</p>
+      <Icon name={error.includes("404") ? "sync_problem" : "error_outline"} className="text-[40px] text-error" />
+      <p className="text-on-surface font-semibold">
+        {error.includes("404") ? "No creative data synced yet" : "Analytics engine not reachable"}
+      </p>
+      <p className="text-on-surface-variant text-[13px]">
+        {error.includes("404") ? "Sync your connected account in Settings, then refresh." : error}
+      </p>
       <Button variant="primary" icon="refresh" onClick={load}>Retry</Button>
     </div>
   );

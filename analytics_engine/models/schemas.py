@@ -125,9 +125,11 @@ class Recommendation(BaseModel):
     type: str
     title: str
     description: str
-    roas_impact: float
-    revenue_impact: float
-    cpa_impact: float
+    roas_impact: float          # % change vs current ROAS, derived from real metrics/benchmarks
+    revenue_impact: float       # % change vs current revenue
+    cpa_impact: float           # % change vs current CPA (negative = improvement)
+    revenue_impact_dollars: float = 0.0  # same projection, in dollars — the number a non-technical user reads first
+    cpa_impact_dollars: float = 0.0      # dollars saved (negative) or added cost (positive) per period
     confidence: float
     priority: str  # "high" | "medium" | "low"
     status: Optional[str] = None  # "approved" | "rejected" | None (pending)
@@ -212,11 +214,6 @@ class GeoRow(BaseModel):
     reach_m: float
 
 
-class InterestSegment(BaseModel):
-    label: str
-    affinity: str  # "high" | "med" | "low"
-
-
 class AudienceData(BaseModel):
     total_unique_reach_m: float
     primary_demographic: str
@@ -225,7 +222,7 @@ class AudienceData(BaseModel):
     age_groups: List[AgeGroup]
     device_split: List[DeviceSlice]
     geo_distribution: List[GeoRow]
-    interest_segments: List[InterestSegment]
+    targeted_interests: List[str]  # real ad-set targeting, not a guessed affinity score
     last_updated: str
 
 

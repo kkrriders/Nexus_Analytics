@@ -34,6 +34,7 @@ async function postJSON(path: string, body?: unknown) {
 
 export const fetchDashboard       = (days?: number) => fetchJSON(`/api/dashboard${days ? `?days=${days}` : ''}`);
 export const fetchCampaigns       = (days?: number) => fetchJSON(`/api/campaigns${days ? `?days=${days}` : ''}`);
+export const fetchCampaignDeviceBreakdown = (campaignId: string) => fetchJSON(`/api/campaigns/${encodeURIComponent(campaignId)}/device-breakdown`);
 export const fetchRecommendations = () => fetchJSON('/api/recommendations');
 export const fetchForecasts       = (days?: number) => fetchJSON(`/api/forecasts${days ? `?days=${days}` : ''}`);
 export const fetchAudience        = () => fetchJSON('/api/audience');

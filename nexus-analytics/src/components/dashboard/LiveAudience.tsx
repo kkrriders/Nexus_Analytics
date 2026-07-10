@@ -8,14 +8,7 @@ import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
 import { fetchAudience } from "@/lib/api";
 import { exportToCsv } from "@/lib/csv";
-
-type Affinity = "high" | "med" | "low";
-
-const AFFINITY_STYLES: Record<Affinity, string> = {
-  high: "bg-primary-fixed text-on-primary-fixed border-primary-fixed-dim",
-  med:  "bg-surface-container-high text-on-surface-variant border-outline-variant",
-  low:  "bg-surface-container text-outline border-outline-variant/50",
-};
+import { useAccountConnections } from "@/lib/useAccountConnections";
 
 const DEVICE_COLORS = ["var(--color-primary)", "var(--color-secondary)", "var(--color-surface-variant)"];
 const DEVICE_DOT    = ["bg-primary", "bg-secondary", "bg-surface-variant"];
@@ -48,6 +41,19 @@ export default function LiveAudience() {
 
   useEffect(() => { load(); }, [load]);
 
+  const { googleConnected, metaConnected, loading: connLoading } = useAccountConnections();
+  if (connLoading) return null;
+  if (!googleConnected && !metaConnected) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">
+      <Icon name="groups" className="text-[40px] text-outline" />
+      <p className="text-on-surface font-semibold">Audience Analytics needs a connected ad account</p>
+      <p className="text-on-surface-variant text-[13px] max-w-md">
+        Connect a Google Ads or Meta Ads account in Settings to see real demographic, device, and
+        geographic data — there&apos;s nothing to show until then.
+      </p>
+    </div>
+  );
+
   if (loading) return (
     <div className="flex items-center justify-center h-64 gap-3">
       <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -56,9 +62,13 @@ export default function LiveAudience() {
   );
   if (error) return (
     <div className="flex flex-col items-center justify-center h-64 gap-4">
-      <Icon name="error_outline" className="text-[40px] text-error" />
-      <p className="text-on-surface font-semibold">Analytics engine not reachable</p>
-      <p className="text-on-surface-variant text-[13px]">{error}</p>
+      <Icon name={error.includes("404") ? "sync_problem" : "error_outline"} className="text-[40px] text-error" />
+      <p className="text-on-surface font-semibold">
+        {error.includes("404") ? "No audience data synced yet" : "Analytics engine not reachable"}
+      </p>
+      <p className="text-on-surface-variant text-[13px]">
+        {error.includes("404") ? "Sync your connected account in Settings, then refresh." : error}
+      </p>
       <Button variant="primary" icon="refresh" onClick={load}>Retry</Button>
     </div>
   );
@@ -66,7 +76,7 @@ export default function LiveAudience() {
   const ageBars:    any[] = data?.age_groups       ?? [];
   const devices:    any[] = data?.device_split      ?? [];
   const geoRows:    any[] = data?.geo_distribution  ?? [];
-  const interests:  any[] = data?.interest_segments ?? [];
+  const interests:  string[] = data?.targeted_interests ?? [];
   const reach:      number = data?.total_unique_reach_m ?? 0;
   const quality:    number = data?.audience_quality_score ?? 0;
   const reachChg:   number = data?.reach_change_pct ?? 0;
@@ -278,44 +288,24 @@ export default function LiveAudience() {
           </div>
         </Card>
 
-        {/* Interest Segments */}
+        {/* Targeted Interests */}
         <Card className="md:col-span-4 p-0 flex flex-col overflow-hidden">
           <div className="p-card-padding border-b border-outline-variant/40">
-            <CardHeader title="Interest Segments" icon="interests" className="border-0 pb-0 mb-0" />
-            <p className="text-body-sm text-on-surface-variant mt-1">Audience affinity clusters by engagement signal</p>
+            <CardHeader title="Targeted Interests" icon="interests" className="border-0 pb-0 mb-0" />
+            <p className="text-body-sm text-on-surface-variant mt-1">Interests actually targeted in your ad sets</p>
           </div>
-          <div className="flex-1 p-card-padding flex flex-col gap-5">
-            <div className="flex flex-wrap gap-2">
-              {interests.map((seg: any) => (
-                <div key={seg.label} className={clsx("flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-body-sm font-medium select-none", AFFINITY_STYLES[seg.affinity as Affinity] ?? AFFINITY_STYLES.low)}>
-                  {seg.label}
-                  <span className={clsx("text-[9px] font-bold uppercase px-1 py-px rounded",
-                    seg.affinity === "high" ? "bg-primary/20 text-primary" : "bg-outline-variant/40 text-outline"
-                  )}>
-                    {seg.affinity}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-auto pt-4 border-t border-outline-variant/30 flex flex-col gap-2">
-              <p className="text-label-caps text-outline uppercase tracking-wider mb-1">Affinity Scale</p>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full bg-primary shrink-0" />
-                <span className="text-body-sm text-on-surface-variant">High — Strong intent signal</span>
+          <div className="flex-1 p-card-padding flex flex-col gap-3">
+            {interests.length === 0 ? (
+              <p className="text-body-sm text-on-surface-variant">No interest targeting configured on your connected ad sets.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {interests.map((label) => (
+                  <div key={label} className="px-3 py-1.5 rounded-full border border-outline-variant bg-surface-container-high text-body-sm font-medium text-on-surface select-none">
+                    {label}
+                  </div>
+                ))}
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full bg-surface-container-highest border border-outline-variant shrink-0" />
-                <span className="text-body-sm text-on-surface-variant">Med — Moderate engagement</span>
-              </div>
-            </div>
-            <div className="p-3 bg-secondary-fixed/30 border border-secondary-fixed rounded-lg flex items-start gap-2">
-              <Icon name="lightbulb" className="text-[18px] text-secondary shrink-0 mt-0.5" />
-              <p className="text-body-sm text-on-surface-variant">
-                <strong className="text-on-surface">Technology</strong> and{" "}
-                <strong className="text-on-surface">Analytics</strong> segments share a{" "}
-                <span className="text-secondary font-semibold">74% audience overlap</span>.
-              </p>
-            </div>
+            )}
           </div>
         </Card>
 

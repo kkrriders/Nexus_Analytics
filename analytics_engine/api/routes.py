@@ -5,13 +5,12 @@ from collections import defaultdict, deque
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from pipeline import run_pipeline
+from pipeline import run_pipeline, build_audience_data, build_creative_data, _DEVICE_LABELS
 from models.schemas import DashboardData, AudienceData, KeywordData, CreativeData
-from preprocessing.mock_generator import (
-    generate_audience_data, generate_keyword_data, generate_creative_data, current_window_seed,
-)
 from auth import require_admin, get_current_user
 from database.postgres_client import query as pg_query, execute as pg_execute
+from database.clickhouse_client import is_connected
+from database.clickhouse_schema import has_real_ads, has_real_breakdowns, read_real_breakdown
 from ai.chat_engine import answer as chat_answer
 from notifications import create_notification
 
@@ -88,6 +87,26 @@ async def get_campaigns(days: int = Query(30, ge=7, le=90), user: dict = Depends
     return run_pipeline(await _account_id_for(user), days=days).campaigns
 
 
+@router.get("/campaigns/{campaign_id}/device-breakdown")
+async def get_campaign_device_breakdown(campaign_id: str, user: dict = Depends(get_current_user)):
+    """Real device-split for one campaign — empty list (not fake data) until synced."""
+    account_id = await _account_id_for(user)
+    if not (is_connected() and account_id):
+        return {"devices": []}
+
+    rows = read_real_breakdown(account_id, "device_platform", campaign_id=campaign_id)
+    totals: dict[str, int] = {}
+    for r in rows:
+        label = _DEVICE_LABELS.get(r["breakdown_value"], str(r["breakdown_value"]).title())
+        totals[label] = totals.get(label, 0) + int(r["impressions"])
+    total = sum(totals.values()) or 1
+    devices = sorted(
+        [{"label": label, "pct": round(impr / total * 100, 1)} for label, impr in totals.items()],
+        key=lambda d: -d["pct"],
+    )
+    return {"devices": devices}
+
+
 @router.get("/recommendations")
 async def get_recommendations(user: dict = Depends(get_current_user)):
     """AI recommendations list plus aggregate KPIs (used by AI Recommendations page)."""
@@ -131,20 +150,28 @@ async def get_forecasts(days: int = Query(30, ge=7, le=90), user: dict = Depends
 
 @router.get("/audience", response_model=AudienceData)
 async def get_audience(user: dict = Depends(get_current_user)):
-    """Audience analytics — demographic, device, geographic, and interest data. Currently mock/illustrative for every account."""
-    return generate_audience_data(current_window_seed())
+    """Real audience demographics/device/geo from ingested ad-account data. No mock fallback — 404 until an account is connected and synced."""
+    account_id = await _account_id_for(user)
+    data = build_audience_data(account_id) if (is_connected() and account_id and has_real_breakdowns(account_id)) else None
+    if data is None:
+        raise HTTPException(status_code=404, detail="No audience data yet — connect an ad account and sync it in Settings.")
+    return data
 
 
 @router.get("/keywords", response_model=KeywordData)
 async def get_keywords(user: dict = Depends(get_current_user)):
-    """Keyword analytics — search volume, CTR, quality scores, and opportunity heatmap. Currently mock/illustrative for every account."""
-    return generate_keyword_data(current_window_seed())
+    """Keyword-level reporting is a Google Ads concept (not available for Meta). Not yet ingested — 404 until Google Ads keyword sync is connected."""
+    raise HTTPException(status_code=404, detail="Keyword data isn't connected yet — Google Ads keyword sync is required.")
 
 
 @router.get("/creatives", response_model=CreativeData)
 async def get_creatives(user: dict = Depends(get_current_user)):
-    """Creative analytics — fatigue scores, CTR, and AI recommendations per creative. Currently mock/illustrative for every account."""
-    return generate_creative_data(current_window_seed())
+    """Real per-ad fatigue/CTR from ingested ad-account data. No mock fallback — 404 until an account is connected and synced."""
+    account_id = await _account_id_for(user)
+    data = build_creative_data(account_id) if (is_connected() and account_id and has_real_ads(account_id)) else None
+    if data is None:
+        raise HTTPException(status_code=404, detail="No creative data yet — connect an ad account and sync it in Settings.")
+    return data
 
 
 @router.get("/health")

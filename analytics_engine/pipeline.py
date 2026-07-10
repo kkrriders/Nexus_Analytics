@@ -28,7 +28,7 @@ from typing import Optional
 from models.schemas import (
     DashboardData, KPISet, KPIChanges, ProcessedCampaign,
     PlatformSummary, Platform, DerivedMetrics, Recommendation,
-    Campaign, CampaignStatus, RawMetrics,
+    Campaign, CampaignStatus, RawMetrics, CreativeData, AudienceData,
 )
 from preprocessing.mock_generator import (
     BASE_CAMPAIGNS, current_window_seed,
@@ -36,19 +36,21 @@ from preprocessing.mock_generator import (
     generate_daily_history, generate_aggregated_history, generate_sparkline,
 )
 from analytics.feature_engineering import compute_derived, pct_change
-from scoring.campaign_health_score import compute_health
+from scoring.campaign_health_score import compute_health, _score_factor, BENCHMARKS
 from trend_analysis.trend_detection import detect_trend
 from anomaly_detection.anomaly_detection import generate_all_alerts
 from recommendations.recommendation_engine import generate_all_recommendations
 from forecasting.revenue_forecast import build_forecasts
-from database.clickhouse_client import is_connected, query as ch_query
+from database.clickhouse_client import is_connected
 from database.clickhouse_schema import (
     write_processed_metrics, write_kpi_snapshot, write_alerts,
     write_ai_recommendations, read_latest_recommendations,
     has_real_campaigns, read_real_campaigns, read_real_campaign_history,
+    read_real_ads, read_real_ad_history, read_real_breakdown,
+    read_breakdown_daily_totals, read_targeted_interests,
     MOCK_ACCOUNT_ID,
 )
-from ai.deepseek_client import enrich_recommendations, analyze_from_clickhouse
+from ai.deepseek_client import enrich_recommendations
 from integrations.meta_ads import sync_if_stale
 
 logger = logging.getLogger(__name__)
@@ -303,12 +305,12 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardD
         write_kpi_snapshot(kpis, window_seed, cache_key)
         write_alerts(alerts, window_seed, cache_key)
 
-    # ── 7. Recommendations — ClickHouse cache → DeepSeek → fallback ─────────
+    # ── 7. Recommendations — numbers are always rule-computed from real metrics;
+    #      DeepSeek (if configured) only rewrites description text, never numbers.
     if ch_active:
-        # Check ClickHouse cache first — avoid calling DeepSeek on every request
+        # Check ClickHouse cache first — avoid recalling DeepSeek every request
         stored = read_latest_recommendations(window_seed, cache_key)
         if stored:
-            # Reuse recommendations already generated for this 5-minute window
             recommendations = [
                 Recommendation(
                     id=str(r["id"]),
@@ -320,6 +322,8 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardD
                     roas_impact=float(r["roas_impact"]),
                     revenue_impact=float(r["revenue_impact"]),
                     cpa_impact=float(r["cpa_impact"]),
+                    revenue_impact_dollars=float(r.get("revenue_impact_dollars", 0)),
+                    cpa_impact_dollars=float(r.get("cpa_impact_dollars", 0)),
                     confidence=float(r["confidence"]),
                     priority=str(r["priority"]),
                 )
@@ -327,59 +331,17 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardD
             ]
             logger.info("Serving %d cached recommendations from ClickHouse (window=%s)", len(recommendations), window_seed)
         else:
-            # No cache for this window — read processed metrics from ClickHouse,
-            # call DeepSeek to generate rich recommendations, then store them back.
-            ch_metrics = ch_query(
-                "SELECT * FROM nexus.processed_metrics WHERE window_seed = {ws:UInt64} AND account_id = {aid:String}",
-                {"ws": window_seed, "aid": cache_key},
-            )
-            kpi_dict = {
-                "total_spend":     total_spend,
-                "total_revenue":   total_rev,
-                "blended_roas":    blended_roas,
-                "average_cpa":     avg_cpa,
-                "average_ctr":     avg_ctr,
-                "ai_health_score": ai_health,
-            }
             rule_rec_dicts = [
                 {**r.model_dump(), "platform": platform_by_id.get(r.campaign_id, "")}
                 for r in raw_recs
             ]
-
-            # DeepSeek reads ClickHouse metrics → generates rich recommendations
-            ai_recs_raw = analyze_from_clickhouse(ch_metrics, kpi_dict, rule_rec_dicts)
-
-            if ai_recs_raw:
-                recommendations = []
-                for r in ai_recs_raw:
-                    try:
-                        recommendations.append(Recommendation(
-                            id=str(r.get("id", "")),
-                            campaign_id=str(r.get("campaign_id", "")),
-                            campaign_name=str(r.get("campaign_name", "")),
-                            type=str(r.get("type", "optimization")),
-                            title=str(r.get("title", "")),
-                            description=str(r.get("description", "")),
-                            roas_impact=float(r.get("roas_impact", 0)),
-                            revenue_impact=float(r.get("revenue_impact", 0)),
-                            cpa_impact=float(r.get("cpa_impact", 0)),
-                            confidence=float(r.get("confidence", 70)),
-                            priority=str(r.get("priority", "medium")),
-                        ))
-                    except Exception as e:
-                        logger.warning("Skipping malformed DeepSeek recommendation: %s", e)
-                # Write DeepSeek results back to ClickHouse for caching
-                write_ai_recommendations(recommendations, window_seed, cache_key)
-            else:
-                # DeepSeek unavailable — enrich rule-based descriptions and cache
-                enriched = enrich_recommendations(rule_rec_dicts)
-                recommendations = [
-                    Recommendation(**{k: v for k, v in d.items() if k != "platform"})
-                    for d in enriched
-                ]
-                write_ai_recommendations(recommendations, window_seed, cache_key)
+            enriched = enrich_recommendations(rule_rec_dicts)
+            recommendations = [
+                Recommendation(**{k: v for k, v in d.items() if k != "platform"})
+                for d in enriched
+            ]
+            write_ai_recommendations(recommendations, window_seed, cache_key)
     else:
-        # No ClickHouse — rule-based recommendations with DeepSeek description enrichment
         rec_dicts = [
             {**r.model_dump(), "platform": platform_by_id.get(r.campaign_id, "")}
             for r in raw_recs
@@ -444,3 +406,160 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> DashboardD
         next_update_in_seconds=next_update,
         window_seed=window_seed,
     )
+
+
+# ── Creative Analytics — built from real ingested ad data only ──────────────
+
+_FATIGUE_BUCKETS = [
+    # (max_fatigue, badge_label, badge_tone, rec_score_tone, rec_box_class, message)
+    (30, "Optimal", "bg-tertiary-container text-on-tertiary-container", "text-tertiary",
+     "bg-surface-container-low border border-outline-variant/50",
+     "Performing well against this account's CTR benchmark. Consider scaling budget or generating similar variants."),
+    (70, "Maturing", "bg-surface-variant text-on-surface-variant", "text-on-surface",
+     "bg-secondary-fixed/20 border border-secondary-fixed",
+     "Stable performance — keep monitoring for a CTR decline."),
+    (101, "High Fatigue", "bg-error-container text-on-error-container", "text-error",
+     "bg-primary-fixed/20 border border-primary-fixed",
+     "CTR is below this account's benchmark — consider refreshing this creative's copy or visuals."),
+]
+
+
+def _fatigue_bucket(fatigue: float) -> tuple:
+    for max_f, *rest in _FATIGUE_BUCKETS:
+        if fatigue <= max_f:
+            return tuple(rest)
+    return _FATIGUE_BUCKETS[-1][1:]
+
+
+def build_creative_data(account_id: str) -> Optional[CreativeData]:
+    """Real Creative Analytics from ingested ad data. None if nothing has been synced yet."""
+    ads = read_real_ads(account_id)
+    if not ads:
+        return None
+
+    bm = BENCHMARKS[Platform.meta_ads]
+    creatives = []
+
+    for ad in ads:
+        history = read_real_ad_history(account_id, ad["id"])
+        if not history:
+            continue
+        latest = history[-1]
+        impressions, clicks, conversions = int(latest["impressions"]), int(latest["clicks"]), int(latest["conversions"])
+        ctr = round(clicks / impressions * 100, 2) if impressions > 0 else 0.0
+        cvr = round(conversions / clicks * 100, 2) if clicks > 0 else 0.0
+
+        ctr_score, _ = _score_factor(ctr, bm["ctr_good"], bm["ctr_warn"], higher_is_better=True)
+        fatigue = round(100 - ctr_score, 1)
+        badge_label, badge_tone, rec_score_tone, rec_box_class, message = _fatigue_bucket(fatigue)
+
+        ctr_series = [round(h["clicks"] / h["impressions"] * 100, 2) if h["impressions"] > 0 else 0.0 for h in history]
+        cvr_series = [round(h["conversions"] / h["clicks"] * 100, 2) if h["clicks"] > 0 else 0.0 for h in history]
+        ctr_dir = detect_trend(ctr_series).value
+        cvr_dir = detect_trend(cvr_series).value
+
+        is_video = "video" in ad.get("creative_type", "").lower()
+        creatives.append({
+            "id": ad["id"],
+            "title": ad["name"],
+            "campaign": ad["campaign"],
+            "type": "video" if is_video else "image",
+            "thumb_icon": "videocam" if is_video else "image",
+            "badge_label": badge_label,
+            "badge_tone": badge_tone,
+            "fatigue_score": fatigue,
+            "ctr": ctr,
+            "conversion_rate": cvr,
+            "ai_recommendation": message,
+            "rec_score": f"{fatigue:.0f}/100",
+            "rec_score_tone": rec_score_tone,
+            "rec_box_class": rec_box_class,
+            "metrics": [
+                {"label": "CTR", "value": f"{ctr:.2f}%", "dir": ctr_dir},
+                {"label": "Conv. Rate", "value": f"{cvr:.2f}%", "dir": cvr_dir},
+            ],
+        })
+
+    return CreativeData(creatives=creatives, last_updated=datetime.now(timezone.utc).isoformat() + "Z")
+
+
+# ── Audience Analytics — built from real ingested breakdown data only ───────
+
+_DEVICE_LABELS = {"desktop": "Desktop", "mobile_app": "Mobile", "mobile_web": "Mobile", "tablet": "Tablet"}
+_COUNTRY_NAMES = {
+    "US": "United States", "GB": "United Kingdom", "CA": "Canada", "AU": "Australia",
+    "DE": "Germany", "FR": "France", "IN": "India", "BR": "Brazil", "JP": "Japan", "MX": "Mexico",
+}
+
+
+def build_audience_data(account_id: str) -> Optional[AudienceData]:
+    """Real Audience Analytics from ingested breakdown data. None if nothing has been synced yet."""
+    age_rows = read_real_breakdown(account_id, "age")
+    if not age_rows:
+        return None
+    device_rows = read_real_breakdown(account_id, "device_platform")
+    country_rows = read_real_breakdown(account_id, "country")
+    targeted = read_targeted_interests(account_id)
+    daily_totals = read_breakdown_daily_totals(account_id, "age")
+
+    total_impr = sum(int(r["impressions"]) for r in age_rows) or 1
+    total_clicks = sum(int(r["clicks"]) for r in age_rows)
+    total_conv = sum(int(r["conversions"]) for r in age_rows)
+    total_reach = sum(int(r["reach"]) for r in age_rows)
+
+    age_groups = sorted([
+        {"label": r["breakdown_value"], "pct": round(int(r["impressions"]) / total_impr * 100, 1), "reach_m": round(int(r["reach"]) / 1_000_000, 2)}
+        for r in age_rows
+    ], key=lambda a: -a["pct"])
+
+    device_totals: dict[str, dict] = {}
+    for r in device_rows:
+        label = _DEVICE_LABELS.get(r["breakdown_value"], r["breakdown_value"].title())
+        d = device_totals.setdefault(label, {"impressions": 0})
+        d["impressions"] += int(r["impressions"])
+    total_device_impr = sum(d["impressions"] for d in device_totals.values()) or 1
+    device_split = sorted([
+        {"label": label, "pct": round(d["impressions"] / total_device_impr * 100, 1)}
+        for label, d in device_totals.items()
+    ], key=lambda d: -d["pct"])
+
+    total_geo_impr = sum(int(r["impressions"]) for r in country_rows) or 1
+    geo_distribution = sorted([
+        {
+            "country": _COUNTRY_NAMES.get(r["breakdown_value"], r["breakdown_value"]),
+            "code": r["breakdown_value"],
+            "pct": round(int(r["impressions"]) / total_geo_impr * 100, 1),
+            "reach_m": round(int(r["reach"]) / 1_000_000, 2),
+        }
+        for r in country_rows
+    ], key=lambda g: -g["pct"])
+
+    ctr_total = clicks_to_pct(total_clicks, total_impr)
+    conv_rate_total = clicks_to_pct(total_conv, total_clicks)
+    bm = BENCHMARKS[Platform.meta_ads]
+    ctr_score, _ = _score_factor(ctr_total, bm["ctr_good"], bm["ctr_warn"], higher_is_better=True)
+    conv_score, _ = _score_factor(conv_rate_total, bm["conv_rate_good"], bm["conv_rate_warn"], higher_is_better=True)
+    quality = round((ctr_score + conv_score) / 2, 1)
+
+    reach_change_pct = 0.0
+    if len(daily_totals) >= 2:
+        reach_change_pct = pct_change(float(daily_totals[-1]["reach"]), float(daily_totals[0]["reach"]))
+
+    top_age = age_groups[0]["label"] if age_groups else "—"
+    top_device = device_split[0]["label"] if device_split else "—"
+
+    return AudienceData(
+        total_unique_reach_m=round(total_reach / 1_000_000, 2),
+        primary_demographic=f"{top_age} · {top_device} users",
+        audience_quality_score=quality,
+        reach_change_pct=reach_change_pct,
+        age_groups=age_groups,
+        device_split=device_split,
+        geo_distribution=geo_distribution,
+        targeted_interests=sorted({str(r["interest"]) for r in targeted}),
+        last_updated=datetime.now(timezone.utc).isoformat() + "Z",
+    )
+
+
+def clicks_to_pct(numerator: int, denominator: int) -> float:
+    return round(numerator / denominator * 100, 2) if denominator > 0 else 0.0

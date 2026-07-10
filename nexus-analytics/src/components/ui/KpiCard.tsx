@@ -20,9 +20,10 @@ type KpiCardProps = {
   direction: "up" | "down" | "flat";
   icon: string;
   accent?: AccentColor;
+  tooltip?: string;
 };
 
-export function KpiCard({ label, value, change, direction, icon, accent = "indigo" }: KpiCardProps) {
+export function KpiCard({ label, value, change, direction, icon, accent = "indigo", tooltip }: KpiCardProps) {
   const a = ACCENT[accent];
   const isUp = direction === "up", isDown = direction === "down";
   const changeColor = isUp ? "text-[#10B981]" : isDown ? "text-[#EF4444]" : "text-on-surface-variant";
@@ -47,7 +48,14 @@ export function KpiCard({ label, value, change, direction, icon, accent = "indig
         <div className="text-[38px] font-bold text-on-surface leading-none tracking-tight mb-1 font-mono">
           {value}
         </div>
-        <div className="text-[13px] font-medium text-on-surface-variant mb-4">{label}</div>
+        <div className="text-[13px] font-medium text-on-surface-variant mb-4 flex items-center gap-1">
+          {label}
+          {tooltip && (
+            <span title={tooltip} className="cursor-help text-outline">
+              <Icon name="info" className="text-[13px]" />
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

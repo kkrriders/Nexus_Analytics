@@ -7,6 +7,7 @@ import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
 import { fetchKeywords } from "@/lib/api";
 import { exportToCsv } from "@/lib/csv";
+import { useAccountConnections } from "@/lib/useAccountConnections";
 
 type Trend  = "up" | "flat" | "down";
 type Status = "active" | "paused";
@@ -52,6 +53,19 @@ export default function LiveKeywords() {
 
   useEffect(() => { load(); }, [load]);
 
+  const { googleConnected, loading: connLoading } = useAccountConnections();
+  if (connLoading) return null;
+  if (!googleConnected) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">
+      <Icon name="search_off" className="text-[40px] text-outline" />
+      <p className="text-on-surface font-semibold">Keyword Analytics needs Google Ads</p>
+      <p className="text-on-surface-variant text-[13px] max-w-md">
+        Keywords are a Google Ads concept — Meta Ads targets by audience, not search terms, so there&apos;s
+        nothing to show here. Connect a Google Ads account in Settings to unlock this page.
+      </p>
+    </div>
+  );
+
   if (loading) return (
     <div className="flex items-center justify-center h-64 gap-3">
       <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -60,9 +74,13 @@ export default function LiveKeywords() {
   );
   if (error) return (
     <div className="flex flex-col items-center justify-center h-64 gap-4">
-      <Icon name="error_outline" className="text-[40px] text-error" />
-      <p className="text-on-surface font-semibold">Analytics engine not reachable</p>
-      <p className="text-on-surface-variant text-[13px]">{error}</p>
+      <Icon name={error.includes("404") ? "sync_problem" : "error_outline"} className="text-[40px] text-error" />
+      <p className="text-on-surface font-semibold">
+        {error.includes("404") ? "Google Ads keyword sync isn't available yet" : "Analytics engine not reachable"}
+      </p>
+      <p className="text-on-surface-variant text-[13px]">
+        {error.includes("404") ? "Keyword-level reporting for Google Ads is coming soon." : error}
+      </p>
       <Button variant="primary" icon="refresh" onClick={load}>Retry</Button>
     </div>
   );

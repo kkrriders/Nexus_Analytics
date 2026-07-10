@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { clsx } from "@/lib/clsx";
 import { Icon } from "@/components/ui/Icon";
 import { workspaceNav, utilityNav, type NavItem } from "@/lib/nav";
+import { useAccountConnections } from "@/lib/useAccountConnections";
 
 type SidebarProps = { open?: boolean; onClose?: () => void };
 
@@ -36,11 +37,14 @@ function NavLink({ item, active, onClick }: { item: NavItem; active: boolean; on
   );
 }
 
-const menuItems = workspaceNav.filter(i => i.group === "MENU");
 const intelligenceItems = workspaceNav.filter(i => i.group === "INTELLIGENCE");
 
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const { googleConnected } = useAccountConnections();
+
+  // Keyword Analytics only makes sense for Google Ads — Meta has no keyword auction.
+  const menuItems = workspaceNav.filter(i => i.group === "MENU" && (i.href !== "/keyword-analytics" || googleConnected));
 
   const content = (
     <>

@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
 import { fetchRecommendations, sendRecommendationAction } from "@/lib/api";
+import { fmt } from "@/lib/format";
 
 type Priority = "high" | "medium" | "low";
 
@@ -37,11 +38,11 @@ function RecCard({ rec, index, busy, onApprove, onReject }: {
   const icon     = TYPE_ICON[rec.type ?? ""] ?? "lightbulb";
   const approved = rec.status === "approved";
 
-  const upliftLines: string[] = [];
-  if (rec.roas_impact    > 0) upliftLines.push(`+${rec.roas_impact.toFixed(1)}% ROAS`);
-  if (rec.revenue_impact > 0) upliftLines.push(`+${rec.revenue_impact.toFixed(1)}% Rev`);
-  if (rec.cpa_impact     < 0) upliftLines.push(`${rec.cpa_impact.toFixed(1)}% CPA`);
-  const uplift = upliftLines[0] ?? "Optimization";
+  // Dollar amount first — that's what a non-technical reader actually parses; % is secondary.
+  const dollarImpact = rec.revenue_impact_dollars || rec.cpa_impact_dollars || 0;
+  const uplift = dollarImpact !== 0
+    ? `${dollarImpact > 0 ? "+" : "-"}${fmt(Math.abs(dollarImpact), "currency")}`
+    : "Optimization";
 
   return (
     <Card id={`rec-${rec.id}`} className={clsx("lg:col-span-4 p-card-padding flex flex-col hover:shadow-md transition-shadow scroll-mt-24",
@@ -69,30 +70,26 @@ function RecCard({ rec, index, busy, onApprove, onReject }: {
           <p className="text-body-sm text-on-surface">{rec.description}</p>
         </div>
 
-        {/* Impact grid */}
-        <div className="grid grid-cols-3 gap-2">
-          {rec.roas_impact !== 0 && (
-            <div className={clsx("rounded-[8px] p-2 text-center", rec.roas_impact > 0 ? "bg-[#ECFDF5]" : "bg-[#FEF2F2]")}>
-              <div className={clsx("text-[16px] font-bold", rec.roas_impact > 0 ? "text-[#10B981]" : "text-[#EF4444]")}>
-                {rec.roas_impact > 0 ? "+" : ""}{rec.roas_impact.toFixed(1)}%
-              </div>
-              <div className="text-[10px] font-medium text-on-surface-variant">ROAS</div>
-            </div>
-          )}
+        {/* Impact grid — dollar amount is the headline, % is the small print underneath */}
+        <div className="grid grid-cols-2 gap-2">
           {rec.revenue_impact !== 0 && (
             <div className={clsx("rounded-[8px] p-2 text-center", rec.revenue_impact > 0 ? "bg-[#ECFDF5]" : "bg-[#FEF2F2]")}>
               <div className={clsx("text-[16px] font-bold", rec.revenue_impact > 0 ? "text-[#10B981]" : "text-[#EF4444]")}>
-                {rec.revenue_impact > 0 ? "+" : ""}{rec.revenue_impact.toFixed(1)}%
+                {rec.revenue_impact_dollars > 0 ? "+" : ""}{fmt(rec.revenue_impact_dollars, "currency")}
               </div>
-              <div className="text-[10px] font-medium text-on-surface-variant">Revenue</div>
+              <div className="text-[10px] font-medium text-on-surface-variant">
+                Revenue ({rec.revenue_impact > 0 ? "+" : ""}{rec.revenue_impact.toFixed(1)}%)
+              </div>
             </div>
           )}
           {rec.cpa_impact !== 0 && (
             <div className={clsx("rounded-[8px] p-2 text-center", rec.cpa_impact < 0 ? "bg-[#ECFDF5]" : "bg-[#FEF2F2]")}>
               <div className={clsx("text-[16px] font-bold", rec.cpa_impact < 0 ? "text-[#10B981]" : "text-[#EF4444]")}>
-                {rec.cpa_impact.toFixed(1)}%
+                {rec.cpa_impact_dollars > 0 ? "+" : ""}{fmt(rec.cpa_impact_dollars, "currency")}
               </div>
-              <div className="text-[10px] font-medium text-on-surface-variant">CPA</div>
+              <div className="text-[10px] font-medium text-on-surface-variant">
+                Cost ({rec.cpa_impact.toFixed(1)}%)
+              </div>
             </div>
           )}
         </div>
