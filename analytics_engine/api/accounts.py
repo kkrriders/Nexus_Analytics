@@ -18,7 +18,9 @@ from pydantic import BaseModel
 
 from auth import get_current_user
 from database.postgres_client import query as pg_query, execute as pg_execute
-from database.clickhouse_schema import write_ingested_campaigns
+from database.clickhouse_schema import (
+    write_ingested_campaigns, write_ingested_ads, write_ingested_breakdowns, write_targeted_interests,
+)
 from integrations.meta_ads import sync_account
 from notifications import create_notification
 
@@ -140,9 +142,11 @@ class IngestBody(BaseModel):
 @router.post("/ingest/{account_id}", dependencies=[Depends(require_n8n_secret)])
 async def ingest_account_data(account_id: str, body: IngestBody):
     """
-    n8n posts normalized Google/Meta campaign data here after each fetch.
-    Persists the real campaign rows into ClickHouse so the dashboard pipeline
-    has real data to read for this account.
+    n8n posts normalized Google/Meta data here after each fetch — campaigns,
+    plus (optionally) ad-level rows, audience breakdowns, and targeted
+    interests, the same shapes meta_ads.py's direct sync writes, so this one
+    endpoint gives n8n full parity with it (Creative/Audience Analytics
+    included, not just top-line campaign totals).
     """
     account_rows = pg_query("SELECT user_id FROM public.accounts WHERE id = %(id)s", {"id": account_id})
     if not account_rows:
@@ -154,10 +158,15 @@ async def ingest_account_data(account_id: str, body: IngestBody):
     m_err = meta_ads.get("error")
     error = g_err or m_err
 
-    if google_ads.get("campaigns"):
-        write_ingested_campaigns(account_id, "google_ads", google_ads["campaigns"])
-    if meta_ads.get("campaigns"):
-        write_ingested_campaigns(account_id, "meta_ads", meta_ads["campaigns"])
+    for platform, data in (("google_ads", google_ads), ("meta_ads", meta_ads)):
+        if data.get("campaigns"):
+            write_ingested_campaigns(account_id, platform, data["campaigns"])
+        if data.get("ads"):
+            write_ingested_ads(account_id, platform, data["ads"], data.get("creatives"))
+        if data.get("breakdowns"):
+            write_ingested_breakdowns(account_id, platform, data["breakdowns"])
+        if data.get("targeting"):
+            write_targeted_interests(account_id, data["targeting"])
 
     ok = pg_execute(
         """UPDATE public.accounts
