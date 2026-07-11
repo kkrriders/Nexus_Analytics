@@ -5,7 +5,7 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { clsx } from "@/lib/clsx";
-import { fetchCampaigns } from "@/lib/api";
+import { fetchCampaigns, fetchBudgetOptimizer } from "@/lib/api";
 import { fmt } from "@/lib/format";
 
 /**
@@ -20,6 +20,7 @@ export default function ScenarioPlanner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [adjustments, setAdjustments] = useState<Record<string, number>>({});
+  const [loadingSuggested, setLoadingSuggested] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -43,6 +44,20 @@ export default function ScenarioPlanner() {
 
   const resetAll = () => {
     setAdjustments(Object.fromEntries(campaigns.map((c) => [c.campaign.id, c.metrics.spend])));
+  };
+
+  const loadSuggested = async () => {
+    try {
+      setLoadingSuggested(true);
+      const optimizer = await fetchBudgetOptimizer();
+      const suggested: Record<string, number> = {};
+      for (const a of optimizer.allocation ?? []) suggested[a.campaign_id] = a.suggested_spend;
+      setAdjustments((prev) => ({ ...prev, ...suggested }));
+    } catch {
+      // best-effort — scenario planner still works from the current sliders
+    } finally {
+      setLoadingSuggested(false);
+    }
   };
 
   const { baselineSpend, baselineRevenue, baselineRoas, scenarioSpend, scenarioRevenue, scenarioRoas, delta } = useMemo(() => {
@@ -87,7 +102,14 @@ export default function ScenarioPlanner() {
       <CardHeader
         title="Scenario Planning"
         icon="schema"
-        action={<Button icon="restart_alt" onClick={resetAll}>Reset</Button>}
+        action={
+          <div className="flex items-center gap-2">
+            <Button icon="auto_awesome" onClick={loadSuggested} disabled={loadingSuggested}>
+              {loadingSuggested ? "Loading…" : "Load Suggested Allocation"}
+            </Button>
+            <Button icon="restart_alt" onClick={resetAll}>Reset</Button>
+          </div>
+        }
       />
       <p className="text-body-sm text-on-surface-variant mb-5">
         Adjust a campaign's budget below to see the projected effect — assumes each campaign's ROAS holds steady at its current real value.

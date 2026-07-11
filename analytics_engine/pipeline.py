@@ -265,8 +265,12 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> Optional[D
     prev_profit = round(sum(c.prev_metrics.profit       for c in active if c.prev_metrics), 2)
     prev_roas   = round(prev_rev / prev_spend, 2)  if prev_spend > 0 else 0
     prev_cpa    = round(prev_spend / prev_conv, 2) if prev_conv  > 0 else 0
-    prev_ctr    = round(avg_ctr * 0.95, 2)
-    prev_health = round(ai_health * 0.96, 1)
+
+    with_prev   = [c for c in active if c.prev_metrics]
+    prev_ctr    = round(sum(c.prev_metrics.ctr for c in with_prev) / len(with_prev), 2) if with_prev else 0
+    prev_health = round(
+        sum(compute_health(c.prev_metrics, c.campaign.platform).score for c in with_prev) / len(with_prev), 1
+    ) if with_prev else 0
 
     kpis = KPISet(
         total_spend=total_spend,

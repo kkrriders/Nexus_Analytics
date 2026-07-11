@@ -189,6 +189,26 @@ _TABLES = {
     """,
 }
 
+# Columns added to _TABLES after a table already existed in deployed
+# ClickHouse instances — CREATE TABLE IF NOT EXISTS never retrofits those, so
+# they're added explicitly here. ADD COLUMN IF NOT EXISTS is a no-op once applied.
+_COLUMN_MIGRATIONS = {
+    "nexus.ai_recommendations": [
+        "ADD COLUMN IF NOT EXISTS revenue_impact_dollars Float64 DEFAULT 0",
+        "ADD COLUMN IF NOT EXISTS cpa_impact_dollars Float64 DEFAULT 0",
+    ],
+}
+
+
+def _apply_column_migrations(client) -> None:
+    for table, alters in _COLUMN_MIGRATIONS.items():
+        for alter in alters:
+            try:
+                client.command(f"ALTER TABLE {table} {alter}")
+            except Exception as e:
+                logger.warning("Column migration failed for %s (%s): %s", table, alter, e)
+
+
 def _existing_tables() -> set[str]:
     """Return the set of tables that already exist in the nexus database."""
     try:
@@ -208,6 +228,7 @@ def create_tables() -> bool:
         existing = _existing_tables()
 
         if expected.issubset(existing):
+            _apply_column_migrations(client)
             logger.info("ClickHouse schema already exists — skipping DDL (%d tables)", len(expected))
             return True
 
@@ -217,6 +238,7 @@ def create_tables() -> bool:
         for table, ddl in missing.items():
             client.command(ddl)
             logger.info("ClickHouse table created: %s", table)
+        _apply_column_migrations(client)
         logger.info("ClickHouse schema ready (%d new, %d existing)", len(missing), len(existing))
         return True
     except Exception as e:

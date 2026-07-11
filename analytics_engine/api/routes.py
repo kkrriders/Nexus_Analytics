@@ -115,6 +115,14 @@ async def get_budget_optimizer(
     data = build_budget_optimizer(dashboard.campaigns, total_budget=total_budget)
     if data is None:
         raise HTTPException(status_code=404, detail="No active campaigns to optimize yet.")
+
+    if data.total_opportunity_cost > 50:
+        create_notification(
+            user_id=user["id"], level="warning",
+            title=f"${data.total_opportunity_cost:,.0f} in misallocated spend found",
+            body="Your Budget Optimizer found campaigns underperforming your account's own best. Review the suggested allocation.",
+            link="/budget-optimizer", dedup_key=f"budget_opportunity_{date.today().isoformat()}",
+        )
     return data
 
 
