@@ -13,6 +13,7 @@ import json
 import logging
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
@@ -21,7 +22,10 @@ from database.postgres_client import query as pg_query, execute as pg_execute
 from database.clickhouse_schema import (
     write_ingested_campaigns, write_ingested_ads, write_ingested_breakdowns, write_targeted_interests,
 )
-from integrations.meta_ads import sync_account
+from integrations.meta_ads import (
+    sync_account, fetch_meta_campaigns, fetch_meta_ads, fetch_ad_creatives,
+    fetch_meta_breakdown, fetch_ad_set_targeting, BREAKDOWN_FIELDS,
+)
 from notifications import create_notification
 
 logger = logging.getLogger(__name__)
@@ -130,6 +134,40 @@ async def list_active_accounts():
         """SELECT id AS account_id, plan AS name, google_ads, meta_ads
            FROM public.accounts WHERE subscription_status = 'active'"""
     )
+
+
+@router.get("/accounts/{account_id}/meta-snapshot", dependencies=[Depends(require_n8n_secret)])
+async def meta_snapshot(account_id: str):
+    """
+    n8n calls this instead of hitting graph.facebook.com directly — the Meta
+    access token stays server-side (never enters n8n execution data/logs) and
+    this returns the same shape the ingestion workflow used to assemble
+    itself from 8 separate Graph API calls, via the fetch_* helpers that
+    sync_account() also uses.
+    """
+    rows = pg_query("SELECT meta_ads FROM public.accounts WHERE id = %(id)s", {"id": account_id})
+    if not rows:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    meta_ads = rows[0]["meta_ads"] or {}
+    token = meta_ads.get("access_token")
+    ad_account_id = meta_ads.get("account_id")
+    if not token or not ad_account_id:
+        raise HTTPException(status_code=400, detail="Account has no Meta ads token/account_id connected")
+
+    try:
+        campaigns = fetch_meta_campaigns(token, ad_account_id)
+        ads = fetch_meta_ads(token, ad_account_id)
+        ad_ids = [a["ad_id"] for a in ads if a["ad_id"]]
+        creatives = fetch_ad_creatives(token, ad_ids)
+        breakdowns = []
+        for dim in BREAKDOWN_FIELDS:
+            breakdowns.extend(fetch_meta_breakdown(token, ad_account_id, dim))
+        targeting = fetch_ad_set_targeting(token, ad_account_id)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Meta Graph API request failed: {e}")
+
+    return {"campaigns": campaigns, "ads": ads, "creatives": creatives, "breakdowns": breakdowns, "targeting": targeting}
 
 
 class IngestBody(BaseModel):

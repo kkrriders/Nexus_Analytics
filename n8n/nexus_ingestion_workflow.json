@@ -15,7 +15,7 @@
     },
     {
       "parameters": {
-        "content": "## Scope note\nThis mirrors meta_ads.py's direct sync: campaigns, ad-level data + creatives, account-wide breakdowns (age/device/country/region), and ad-set targeting.\n\nSkipped: per-campaign device-split breakdown (only powers one secondary drill-down). Add a per-campaign loop over \"Meta Breakdown Device\" if you need it.",
+        "content": "## Scope note\nMeta data now comes from one call to GET /api/accounts/{id}/meta-snapshot, which runs meta_ads.py's own fetch_* helpers server-side and returns the same shape this workflow used to assemble from 8 separate Graph API nodes. The access token stays on the backend and never enters n8n execution data/logs — see accounts.py's meta_snapshot endpoint.\n\nSkipped: per-campaign device-split breakdown (only powers one secondary drill-down). Add it inside meta_snapshot() if you need it.",
         "height": 220,
         "width": 320
       },
@@ -85,20 +85,13 @@
     },
     {
       "parameters": {
-        "url": "=https://graph.facebook.com/v19.0/act_{{ $json.meta_ads.account_id }}/insights",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "fields", "value": "campaign_id,campaign_name,impressions,clicks,spend,actions,action_values" },
-            { "name": "date_preset", "value": "today" },
-            { "name": "level", "value": "campaign" },
-            { "name": "access_token", "value": "={{ $json.meta_ads.access_token }}" }
-          ]
-        },
+        "url": "=https://nexus-analytics-lzbl.onrender.com/api/accounts/{{ $json.account_id }}/meta-snapshot",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "options": {}
       },
-      "id": "http_meta_campaigns",
-      "name": "Meta Campaigns",
+      "id": "http_meta_snapshot",
+      "name": "Meta Snapshot",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [900, 140]
@@ -106,213 +99,13 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const raw = $json.data || [];\nconst account = $('Get Active Accounts').item.json;\n\nfunction extractConversions(r) {\n  const purchases = (r.actions || []).filter(a => a.action_type === 'purchase');\n  const purchaseValues = (r.action_values || []).filter(a => a.action_type === 'purchase');\n  const conversions = purchases.reduce((sum, a) => sum + (parseInt(a.value, 10) || 0), 0);\n  const revenue = purchaseValues.reduce((sum, a) => sum + (parseFloat(a.value) || 0), 0);\n  return { conversions, revenue };\n}\n\nconst campaigns = raw.map(r => {\n  const { conversions, revenue } = extractConversions(r);\n  return {\n    campaign_id: String(r.campaign_id || ''),\n    campaign_name: String(r.campaign_name || ''),\n    impressions: parseInt(r.impressions, 10) || 0,\n    clicks: parseInt(r.clicks, 10) || 0,\n    spend: parseFloat(r.spend) || 0,\n    conversions,\n    revenue,\n  };\n});\n\nreturn {\n  json: {\n    account_id: account.account_id,\n    account_name: account.name,\n    meta_ads_cred: account.meta_ads,\n    google_ads_cred: account.google_ads,\n    campaigns,\n  },\n};"
-      },
-      "id": "code_norm_campaigns",
-      "name": "Normalize Meta Campaigns",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1120, 140]
-    },
-    {
-      "parameters": {
-        "url": "=https://graph.facebook.com/v19.0/act_{{ $json.meta_ads_cred.account_id }}/insights",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "fields", "value": "ad_id,ad_name,campaign_id,campaign_name,impressions,clicks,spend,actions,action_values" },
-            { "name": "date_preset", "value": "today" },
-            { "name": "level", "value": "ad" },
-            { "name": "access_token", "value": "={{ $json.meta_ads_cred.access_token }}" }
-          ]
-        },
-        "options": {}
-      },
-      "id": "http_meta_ads",
-      "name": "Meta Ads",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1340, 140]
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const raw = $json.data || [];\nconst prev = $('Normalize Meta Campaigns').item.json;\n\nfunction extractConversions(r) {\n  const purchases = (r.actions || []).filter(a => a.action_type === 'purchase');\n  const purchaseValues = (r.action_values || []).filter(a => a.action_type === 'purchase');\n  const conversions = purchases.reduce((sum, a) => sum + (parseInt(a.value, 10) || 0), 0);\n  const revenue = purchaseValues.reduce((sum, a) => sum + (parseFloat(a.value) || 0), 0);\n  return { conversions, revenue };\n}\n\nconst ads = raw.map(r => {\n  const { conversions, revenue } = extractConversions(r);\n  return {\n    ad_id: String(r.ad_id || ''),\n    ad_name: String(r.ad_name || ''),\n    campaign_id: String(r.campaign_id || ''),\n    campaign_name: String(r.campaign_name || ''),\n    impressions: parseInt(r.impressions, 10) || 0,\n    clicks: parseInt(r.clicks, 10) || 0,\n    spend: parseFloat(r.spend) || 0,\n    conversions,\n    revenue,\n  };\n});\n\nconst ad_ids_csv = ads.map(a => a.ad_id).filter(Boolean).join(',');\n\nreturn { json: { ...prev, ads, ad_ids_csv } };"
-      },
-      "id": "code_norm_ads",
-      "name": "Normalize Meta Ads",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1560, 140]
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const state = $json;\nlet creatives = {};\n\nif (state.ad_ids_csv) {\n  // Note: depending on n8n version this may need to be $helpers.httpRequest\n  // instead of this.helpers.httpRequest — try the other one if this throws.\n  const resp = await this.helpers.httpRequest({\n    method: 'GET',\n    url: 'https://graph.facebook.com/v19.0/',\n    qs: {\n      ids: state.ad_ids_csv,\n      fields: 'creative{title,body,thumbnail_url,object_type}',\n      access_token: state.meta_ads_cred.access_token,\n    },\n    json: true,\n  });\n  for (const [adId, obj] of Object.entries(resp || {})) {\n    const c = (obj && obj.creative) || {};\n    creatives[adId] = {\n      title: c.title || c.body || '',\n      thumbnail_url: c.thumbnail_url || '',\n      object_type: (c.object_type || 'image').toLowerCase(),\n    };\n  }\n}\n\nreturn { json: { ...state, creatives } };"
-      },
-      "id": "code_fetch_creatives",
-      "name": "Fetch Creatives",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1780, 140]
-    },
-    {
-      "parameters": {
-        "url": "=https://graph.facebook.com/v19.0/act_{{ $json.meta_ads_cred.account_id }}/insights",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "fields", "value": "campaign_id,impressions,clicks,spend,reach,actions,action_values" },
-            { "name": "breakdowns", "value": "age" },
-            { "name": "date_preset", "value": "today" },
-            { "name": "level", "value": "account" },
-            { "name": "access_token", "value": "={{ $json.meta_ads_cred.access_token }}" }
-          ]
-        },
-        "options": {}
-      },
-      "id": "http_bd_age",
-      "name": "Meta Breakdown Age",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [2000, 140]
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const prev = $('Fetch Creatives').item.json;\nreturn { json: { ...prev, breakdown_age: $json.data || [] } };"
-      },
-      "id": "code_merge_age",
-      "name": "Merge Breakdown Age",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [2220, 140]
-    },
-    {
-      "parameters": {
-        "url": "=https://graph.facebook.com/v19.0/act_{{ $json.meta_ads_cred.account_id }}/insights",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "fields", "value": "campaign_id,impressions,clicks,spend,reach,actions,action_values" },
-            { "name": "breakdowns", "value": "device_platform" },
-            { "name": "date_preset", "value": "today" },
-            { "name": "level", "value": "account" },
-            { "name": "access_token", "value": "={{ $json.meta_ads_cred.access_token }}" }
-          ]
-        },
-        "options": {}
-      },
-      "id": "http_bd_device",
-      "name": "Meta Breakdown Device",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [2440, 140]
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const prev = $('Merge Breakdown Age').item.json;\nreturn { json: { ...prev, breakdown_device: $json.data || [] } };"
-      },
-      "id": "code_merge_device",
-      "name": "Merge Breakdown Device",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [2660, 140]
-    },
-    {
-      "parameters": {
-        "url": "=https://graph.facebook.com/v19.0/act_{{ $json.meta_ads_cred.account_id }}/insights",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "fields", "value": "campaign_id,impressions,clicks,spend,reach,actions,action_values" },
-            { "name": "breakdowns", "value": "country" },
-            { "name": "date_preset", "value": "today" },
-            { "name": "level", "value": "account" },
-            { "name": "access_token", "value": "={{ $json.meta_ads_cred.access_token }}" }
-          ]
-        },
-        "options": {}
-      },
-      "id": "http_bd_country",
-      "name": "Meta Breakdown Country",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [2880, 140]
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const prev = $('Merge Breakdown Device').item.json;\nreturn { json: { ...prev, breakdown_country: $json.data || [] } };"
-      },
-      "id": "code_merge_country",
-      "name": "Merge Breakdown Country",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [3100, 140]
-    },
-    {
-      "parameters": {
-        "url": "=https://graph.facebook.com/v19.0/act_{{ $json.meta_ads_cred.account_id }}/insights",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "fields", "value": "campaign_id,impressions,clicks,spend,reach,actions,action_values" },
-            { "name": "breakdowns", "value": "region" },
-            { "name": "date_preset", "value": "today" },
-            { "name": "level", "value": "account" },
-            { "name": "access_token", "value": "={{ $json.meta_ads_cred.access_token }}" }
-          ]
-        },
-        "options": {}
-      },
-      "id": "http_bd_region",
-      "name": "Meta Breakdown Region",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [3320, 140]
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const prev = $('Merge Breakdown Country').item.json;\nconst regionRows = $json.data || [];\n\nfunction extractConversions(r) {\n  const purchases = (r.actions || []).filter(a => a.action_type === 'purchase');\n  const purchaseValues = (r.action_values || []).filter(a => a.action_type === 'purchase');\n  const conversions = purchases.reduce((sum, a) => sum + (parseInt(a.value, 10) || 0), 0);\n  const revenue = purchaseValues.reduce((sum, a) => sum + (parseFloat(a.value) || 0), 0);\n  return { conversions, revenue };\n}\n\nfunction normalizeRows(rows, breakdownType, field) {\n  return rows.map(r => {\n    const { conversions, revenue } = extractConversions(r);\n    return {\n      breakdown_type: breakdownType,\n      breakdown_value: String(r[field] || 'unknown'),\n      campaign_id: String(r.campaign_id || ''),\n      impressions: parseInt(r.impressions, 10) || 0,\n      clicks: parseInt(r.clicks, 10) || 0,\n      spend: parseFloat(r.spend) || 0,\n      reach: parseInt(r.reach, 10) || 0,\n      conversions,\n      revenue,\n    };\n  });\n}\n\nconst breakdowns = [\n  ...normalizeRows(prev.breakdown_age || [], 'age', 'age'),\n  ...normalizeRows(prev.breakdown_device || [], 'device_platform', 'device_platform'),\n  ...normalizeRows(prev.breakdown_country || [], 'country', 'country'),\n  ...normalizeRows(regionRows, 'region', 'region'),\n];\n\nreturn { json: { ...prev, breakdowns } };"
-      },
-      "id": "code_merge_region",
-      "name": "Merge Breakdown Region",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [3540, 140]
-    },
-    {
-      "parameters": {
-        "url": "=https://graph.facebook.com/v19.0/act_{{ $json.meta_ads_cred.account_id }}/adsets",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "fields", "value": "id,name,targeting{flexible_spec,interests}" },
-            { "name": "limit", "value": "100" },
-            { "name": "access_token", "value": "={{ $json.meta_ads_cred.access_token }}" }
-          ]
-        },
-        "options": {}
-      },
-      "id": "http_targeting",
-      "name": "Meta Ad Set Targeting",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [3760, 140]
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const prev = $('Merge Breakdown Region').item.json;\nconst adsets = $json.data || [];\n\nconst targeting = [];\nfor (const adset of adsets) {\n  const t = adset.targeting || {};\n  const interests = [...(t.interests || [])];\n  for (const spec of (t.flexible_spec || [])) {\n    interests.push(...(spec.interests || []));\n  }\n  for (const interest of interests) {\n    if (interest && interest.name) {\n      targeting.push({ adset_id: adset.id || '', interest: interest.name });\n    }\n  }\n}\n\nreturn {\n  json: {\n    account_id: prev.account_id,\n    account_name: prev.account_name,\n    google_ads_cred: prev.google_ads_cred,\n    meta_ads: {\n      campaigns: prev.campaigns,\n      ads: prev.ads,\n      creatives: prev.creatives,\n      breakdowns: prev.breakdowns,\n      targeting,\n    },\n  },\n};"
+        "jsCode": "const account = $('Split Accounts').item.json;\nconst snapshot = $json;\n\nreturn {\n  json: {\n    account_id: account.account_id,\n    account_name: account.name,\n    google_ads_cred: account.google_ads,\n    meta_ads: {\n      campaigns: snapshot.campaigns || [],\n      ads: snapshot.ads || [],\n      creatives: snapshot.creatives || {},\n      breakdowns: snapshot.breakdowns || [],\n      targeting: snapshot.targeting || [],\n    },\n  },\n};"
       },
       "id": "code_assemble_meta",
       "name": "Assemble Meta Platform",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3980, 140]
+      "position": [1120, 140]
     },
     {
       "parameters": {
@@ -404,24 +197,11 @@
     "Split Accounts": { "main": [[{ "node": "Has Meta Token", "type": "main", "index": 0 }]] },
     "Has Meta Token": {
       "main": [
-        [{ "node": "Meta Campaigns", "type": "main", "index": 0 }],
+        [{ "node": "Meta Snapshot", "type": "main", "index": 0 }],
         [{ "node": "No Meta Data", "type": "main", "index": 0 }]
       ]
     },
-    "Meta Campaigns": { "main": [[{ "node": "Normalize Meta Campaigns", "type": "main", "index": 0 }]] },
-    "Normalize Meta Campaigns": { "main": [[{ "node": "Meta Ads", "type": "main", "index": 0 }]] },
-    "Meta Ads": { "main": [[{ "node": "Normalize Meta Ads", "type": "main", "index": 0 }]] },
-    "Normalize Meta Ads": { "main": [[{ "node": "Fetch Creatives", "type": "main", "index": 0 }]] },
-    "Fetch Creatives": { "main": [[{ "node": "Meta Breakdown Age", "type": "main", "index": 0 }]] },
-    "Meta Breakdown Age": { "main": [[{ "node": "Merge Breakdown Age", "type": "main", "index": 0 }]] },
-    "Merge Breakdown Age": { "main": [[{ "node": "Meta Breakdown Device", "type": "main", "index": 0 }]] },
-    "Meta Breakdown Device": { "main": [[{ "node": "Merge Breakdown Device", "type": "main", "index": 0 }]] },
-    "Merge Breakdown Device": { "main": [[{ "node": "Meta Breakdown Country", "type": "main", "index": 0 }]] },
-    "Meta Breakdown Country": { "main": [[{ "node": "Merge Breakdown Country", "type": "main", "index": 0 }]] },
-    "Merge Breakdown Country": { "main": [[{ "node": "Meta Breakdown Region", "type": "main", "index": 0 }]] },
-    "Meta Breakdown Region": { "main": [[{ "node": "Merge Breakdown Region", "type": "main", "index": 0 }]] },
-    "Merge Breakdown Region": { "main": [[{ "node": "Meta Ad Set Targeting", "type": "main", "index": 0 }]] },
-    "Meta Ad Set Targeting": { "main": [[{ "node": "Assemble Meta Platform", "type": "main", "index": 0 }]] },
+    "Meta Snapshot": { "main": [[{ "node": "Assemble Meta Platform", "type": "main", "index": 0 }]] },
     "Assemble Meta Platform": { "main": [[{ "node": "Has Google Token", "type": "main", "index": 0 }]] },
     "No Meta Data": { "main": [[{ "node": "Has Google Token", "type": "main", "index": 0 }]] },
     "Has Google Token": {
@@ -434,5 +214,10 @@
     "No Google Data": { "main": [[{ "node": "Build Ingest Body", "type": "main", "index": 0 }]] },
     "Build Ingest Body": { "main": [[{ "node": "Post Ingest", "type": "main", "index": 0 }]] }
   },
-  "settings": { "executionOrder": "v1" }
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": false
+  }
 }
