@@ -52,8 +52,8 @@ def generate_recommendations(campaign: Campaign, metrics: DerivedMetrics) -> Lis
             description=(
                 f"{campaign.name} is returning {metrics.roas:.1f}x ROAS with "
                 f"{metrics.budget_utilization:.0f}% of budget spent. Increasing budget by "
-                f"{extra_spend_pct:.0f}% (+${extra_spend:,.0f}) would add an estimated "
-                f"${revenue_dollars:,.0f} in revenue this period if ROAS holds."
+                f"{extra_spend_pct:.0f}% (+₹{extra_spend:,.0f}) would add an estimated "
+                f"₹{revenue_dollars:,.0f} in revenue this period if ROAS holds."
             ),
             roas_impact=0.0, revenue_impact=revenue_pct, cpa_impact=0.0,
             revenue_impact_dollars=revenue_dollars, confidence=_confidence(roas_score),
@@ -74,7 +74,7 @@ def generate_recommendations(campaign: Campaign, metrics: DerivedMetrics) -> Lis
                 f"CTR is {metrics.ctr:.1f}% vs a {bm['ctr_good']:.1f}% benchmark for "
                 f"{campaign.platform.value.replace('_', ' ').title()} — {ctr_gap_pct:.0f}% above target. "
                 f"Testing a {bid_increase_pct:.0f}% bid increase on this campaign is projected to add "
-                f"${revenue_dollars:,.0f} in revenue this period if ROAS holds."
+                f"₹{revenue_dollars:,.0f} in revenue this period if ROAS holds."
             ),
             roas_impact=0.0, revenue_impact=revenue_pct, cpa_impact=0.0,
             revenue_impact_dollars=revenue_dollars, confidence=_confidence(ctr_score),
@@ -95,7 +95,7 @@ def generate_recommendations(campaign: Campaign, metrics: DerivedMetrics) -> Lis
             description=(
                 f"CTR of {metrics.ctr:.1f}% is below the {bm['ctr_warn']:.1f}% warning threshold for this "
                 f"platform, suggesting creative fatigue. Recovering to the {target_ctr:.1f}% benchmark is "
-                f"projected to add ${revenue_dollars:,.0f} in revenue this period."
+                f"projected to add ₹{revenue_dollars:,.0f} in revenue this period."
             ),
             roas_impact=0.0, revenue_impact=revenue_pct, cpa_impact=0.0,
             revenue_impact_dollars=revenue_dollars, confidence=_confidence(100 - ctr_score),
@@ -116,7 +116,7 @@ def generate_recommendations(campaign: Campaign, metrics: DerivedMetrics) -> Lis
                 f"Clicks are healthy (CTR {metrics.ctr:.1f}%) but conversion rate is only "
                 f"{metrics.conversion_rate:.1f}%, below the {bm['conv_rate_warn']:.1f}% warning threshold. "
                 f"Reaching the {bm['conv_rate_good']:.1f}% benchmark is projected to add "
-                f"${revenue_dollars:,.0f} in revenue this period."
+                f"₹{revenue_dollars:,.0f} in revenue this period."
             ),
             roas_impact=0.0, revenue_impact=revenue_pct, cpa_impact=0.0,
             revenue_impact_dollars=revenue_dollars, confidence=_confidence(100 - conv_score),
@@ -133,9 +133,9 @@ def generate_recommendations(campaign: Campaign, metrics: DerivedMetrics) -> Lis
             priority="medium",
             title="Narrow targeting — CPA above benchmark",
             description=(
-                f"CPA of ${metrics.cpa:.0f} exceeds the ${bm['cpa_warn']:.0f} warning threshold for this "
-                f"platform. Tightening targeting toward the ${bm['cpa_good']:.0f} benchmark is projected to "
-                f"save ${-cpa_dollars:,.0f} this period across {metrics.conversions} conversions."
+                f"CPA of ₹{metrics.cpa:.0f} exceeds the ₹{bm['cpa_warn']:.0f} warning threshold for this "
+                f"platform. Tightening targeting toward the ₹{bm['cpa_good']:.0f} benchmark is projected to "
+                f"save ₹{-cpa_dollars:,.0f} this period across {metrics.conversions} conversions."
             ),
             roas_impact=0.0, revenue_impact=0.0, cpa_impact=cpa_pct,
             cpa_impact_dollars=cpa_dollars, confidence=_confidence(100 - cpa_score),
@@ -149,7 +149,7 @@ def generate_recommendations(campaign: Campaign, metrics: DerivedMetrics) -> Lis
             title="Consider pausing — ROAS below benchmark",
             description=(
                 f"ROAS of {metrics.roas:.2f}x is below the {bm['roas_warn']:.1f}x warning threshold for this "
-                f"platform — this campaign is losing ${metrics.spend - metrics.revenue:,.0f} against spend "
+                f"platform — this campaign is losing ₹{metrics.spend - metrics.revenue:,.0f} against spend "
                 f"this period. Pause and reallocate budget to higher-performing campaigns."
             ),
             roas_impact=0.0, revenue_impact=0.0, cpa_impact=0.0,
