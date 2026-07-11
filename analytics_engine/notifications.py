@@ -6,9 +6,17 @@ api/notifications.py.
 import logging
 from typing import Optional
 
-from database.postgres_client import execute as pg_execute
+from database.postgres_client import execute as pg_execute, query as pg_query
 
 logger = logging.getLogger(__name__)
+
+
+def _wants_critical_alerts(user_id: str) -> bool:
+    rows = pg_query(
+        "SELECT notification_prefs->>'criticalAlerts' AS v FROM public.users WHERE id = %(uid)s",
+        {"uid": user_id},
+    )
+    return rows[0]["v"] != "false" if rows and rows[0]["v"] is not None else True
 
 
 def create_notification(
@@ -23,7 +31,14 @@ def create_notification(
 ) -> bool:
     """Insert a notification. `dedup_key` (scoped per user/admin) silently no-ops
     on repeat instead of spamming duplicates — pass one for anything that could
-    otherwise fire repeatedly for the same underlying issue."""
+    otherwise fire repeatedly for the same underlying issue.
+
+    A user-scoped critical notification is dropped (not an error — the
+    preference was respected) if that user has turned off critical alerts in
+    Settings. Admin-audience notifications (user_id=None) are never gated."""
+    if user_id and level == "critical" and not _wants_critical_alerts(user_id):
+        return True
+
     scope_key = user_id if user_id else "admin"
     params = {
         "user_id": user_id, "scope_key": scope_key, "audience": audience,

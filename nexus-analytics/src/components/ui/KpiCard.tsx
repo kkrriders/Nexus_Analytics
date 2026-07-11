@@ -16,8 +16,8 @@ type KpiCardProps = {
 // delta badge below, where it actually means something (up=good/down=bad).
 export function KpiCard({ label, value, change, direction, icon, tooltip }: KpiCardProps) {
   const isUp = direction === "up", isDown = direction === "down";
-  const changeColor = isUp ? "text-[#10B981]" : isDown ? "text-[#EF4444]" : "text-on-surface-variant";
-  const changeBg   = isUp ? "bg-[#ECFDF5]"  : isDown ? "bg-[#FEF2F2]"  : "bg-surface-container";
+  const changeColor = isUp ? "text-tertiary" : isDown ? "text-error" : "text-on-surface-variant";
+  const changeBg   = isUp ? "bg-tertiary-container" : isDown ? "bg-error-container" : "bg-surface-container";
   const arrow      = isUp ? "arrow_upward"  : isDown ? "arrow_downward" : "remove";
 
   return (
@@ -35,7 +35,10 @@ export function KpiCard({ label, value, change, direction, icon, tooltip }: KpiC
         </div>
 
         {/* Value */}
-        <div className="text-[38px] font-bold text-on-surface leading-none tracking-tight mb-1 font-mono">
+        <div
+          title={value}
+          className="text-[28px] xl:text-[26px] 2xl:text-[30px] font-bold text-on-surface leading-none tracking-tight mb-1 font-mono truncate"
+        >
           {value}
         </div>
         <div className="text-[13px] font-medium text-on-surface-variant mb-4 flex items-center gap-1">

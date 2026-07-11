@@ -1,9 +1,40 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from auth import get_current_user, require_admin
 from database.postgres_client import query as pg_query, execute as pg_execute
 
 router = APIRouter()
+
+DEFAULT_NOTIFICATION_PREFS = {
+    "criticalAlerts": True, "weeklySummary": True, "aiDigest": True, "productUpdates": False,
+}
+
+
+class NotificationPrefs(BaseModel):
+    criticalAlerts: bool = True
+    weeklySummary: bool = True
+    aiDigest: bool = True
+    productUpdates: bool = False
+
+
+@router.get("/settings/notification-prefs")
+async def get_notification_prefs(user: dict = Depends(get_current_user)):
+    rows = pg_query("SELECT notification_prefs FROM public.users WHERE id = %(uid)s", {"uid": user["id"]})
+    return rows[0]["notification_prefs"] if rows and rows[0]["notification_prefs"] else DEFAULT_NOTIFICATION_PREFS
+
+
+@router.put("/settings/notification-prefs")
+async def set_notification_prefs(prefs: NotificationPrefs, user: dict = Depends(get_current_user)):
+    ok = pg_execute(
+        "UPDATE public.users SET notification_prefs = %(prefs)s, updated_at = now() WHERE id = %(uid)s",
+        {"prefs": json.dumps(prefs.model_dump()), "uid": user["id"]},
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to save notification preferences")
+    return {"status": "ok"}
 
 
 @router.get("/notifications")

@@ -20,10 +20,10 @@ async function fetchJSON(path: string) {
   return res.json();
 }
 
-async function postJSON(path: string, body?: unknown) {
+async function postJSON(path: string, body?: unknown, method: 'POST' | 'PUT' = 'POST') {
   const token = await authToken();
   const res = await fetch(`${ENGINE_URL}${path}`, {
-    method: 'POST',
+    method,
     cache: 'no-store',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
@@ -48,6 +48,15 @@ export const fetchBudgetOptimizer = (totalBudget?: number) =>
 export const fetchNotifications         = () => fetchJSON('/api/notifications');
 export const markNotificationRead       = (id: string) => postJSON(`/api/notifications/${id}/read`);
 export const markAllNotificationsRead   = () => postJSON('/api/notifications/read-all');
+
+export type NotificationPrefs = {
+  criticalAlerts: boolean;
+  weeklySummary: boolean;
+  aiDigest: boolean;
+  productUpdates: boolean;
+};
+export const fetchNotificationPrefs = (): Promise<NotificationPrefs> => fetchJSON('/api/settings/notification-prefs');
+export const saveNotificationPrefs  = (prefs: NotificationPrefs) => postJSON('/api/settings/notification-prefs', prefs, 'PUT');
 
 export type RecommendationActionBody = {
   campaign_id: string;

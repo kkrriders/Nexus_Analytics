@@ -4,7 +4,7 @@ import { Icon } from "./Icon";
 export type AccentColor = "indigo" | "blue" | "emerald" | "amber" | "rose" | "purple" | "cyan";
 
 const ACCENT: Record<AccentColor, { bg: string; text: string; bar: string; glow: string }> = {
-  indigo:  { bg: "bg-[#EEF2FF]", text: "text-[#4F46E5]", bar: "#4F46E5", glow: "rgba(79,70,229,0.15)"  },
+  indigo:  { bg: "bg-primary-container", text: "text-primary", bar: "#4F46E5", glow: "rgba(79,70,229,0.15)"  },
   blue:    { bg: "bg-[#EFF6FF]", text: "text-[#2563EB]", bar: "#2563EB", glow: "rgba(37,99,235,0.15)"  },
   emerald: { bg: "bg-[#ECFDF5]", text: "text-[#10B981]", bar: "#10B981", glow: "rgba(16,185,129,0.15)" },
   amber:   { bg: "bg-[#FFFBEB]", text: "text-[#F59E0B]", bar: "#F59E0B", glow: "rgba(245,158,11,0.15)" },
@@ -25,8 +25,8 @@ type KpiCardProps = {
 export function KpiCard({ label, value, change, direction, icon, accent = "indigo" }: KpiCardProps) {
   const a = ACCENT[accent];
   const isUp = direction === "up", isDown = direction === "down";
-  const changeColor = isUp ? "text-[#10B981]" : isDown ? "text-[#EF4444]" : "text-on-surface-variant";
-  const changeBg   = isUp ? "bg-[#ECFDF5]"  : isDown ? "bg-[#FEF2F2]"  : "bg-surface-container";
+  const changeColor = isUp ? "text-tertiary" : isDown ? "text-error" : "text-on-surface-variant";
+  const changeBg   = isUp ? "bg-tertiary-container" : isDown ? "bg-error-container" : "bg-surface-container";
   const arrow      = isUp ? "arrow_upward"  : isDown ? "arrow_downward" : "remove";
 
   return (
@@ -44,7 +44,10 @@ export function KpiCard({ label, value, change, direction, icon, accent = "indig
         </div>
 
         {/* Value */}
-        <div className="text-[38px] font-bold text-on-surface leading-none tracking-tight mb-1 font-mono">
+        <div
+          title={value}
+          className="text-[28px] xl:text-[26px] 2xl:text-[30px] font-bold text-on-surface leading-none tracking-tight mb-1 font-mono truncate"
+        >
           {value}
         </div>
         <div className="text-[13px] font-medium text-on-surface-variant mb-4">{label}</div>
