@@ -159,7 +159,6 @@ def _aggregate_real_history(history_map: dict[str, list[dict]], days: int = 30) 
                 clicks += p["clicks"]; impr += p["impressions"]; conv += p["conversions"]
 
         spend = max(spend, 0.01)
-        conv  = max(conv, 0.01)
         impr  = max(impr, 1)
 
         try:
@@ -172,7 +171,7 @@ def _aggregate_real_history(history_map: dict[str, list[dict]], days: int = 30) 
             "date": d, "label": label,
             "spend": round(spend, 2), "revenue": round(rev, 2),
             "roas": round(rev / spend, 2), "ctr": round(clicks / impr * 100, 2),
-            "cpa": round(spend / conv, 2), "conversions": round(conv),
+            "cpa": round(spend / conv, 2) if conv > 0 else 0, "conversions": round(conv),
             "clicks": round(clicks), "impressions": round(impr),
         })
     return agg

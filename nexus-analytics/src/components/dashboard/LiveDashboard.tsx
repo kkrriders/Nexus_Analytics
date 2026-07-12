@@ -14,6 +14,24 @@ import { exportToCsv } from "@/lib/csv";
 import { fmt } from "@/lib/format";
 import { useAccountConnections } from "@/lib/useAccountConnections";
 
+// Tiny inline delta pill — same up=good/down=bad language as KpiCard's badge,
+// scaled down to sit next to a metric label inside a denser grid tile.
+// `inverse` flips which direction counts as "good" (e.g. CPA falling is good) —
+// mirrors KpiCard/`d()`'s convention: the arrow/color track "improved", not raw sign.
+function DeltaPill({ pct, inverse = false }: { pct: number; inverse?: boolean }) {
+  if (!Number.isFinite(pct) || pct === 0) return null;
+  const good = inverse ? pct < 0 : pct > 0;
+  return (
+    <span className={clsx(
+      "inline-flex items-center gap-0.5 text-[10px] font-bold",
+      good ? "text-tertiary" : "text-error"
+    )}>
+      <Icon name={good ? "arrow_upward" : "arrow_downward"} className="text-[9px]" />
+      {Math.abs(pct).toFixed(1)}%
+    </span>
+  );
+}
+
 function HealthBar({ value, size = "md" }: { value: number; size?: "sm" | "md" }) {
   const color = value >= 80 ? "#10B981" : value >= 60 ? "#F59E0B" : "#EF4444";
   const h = size === "sm" ? "h-1" : "h-1.5";
@@ -168,6 +186,28 @@ export default function LiveDashboard() {
       : (b.metrics?.[tableSortKey] ?? 0) - (a.metrics?.[tableSortKey] ?? 0)
   );
   const platforms = data?.platforms ?? [];
+
+  // Per-platform vs-previous-period deltas, from each campaign's own current/prev
+  // metrics — same real numbers already used by the KPI row, just grouped by platform.
+  const pctDelta = (cur: number, prev: number) => (prev === 0 ? 0 : ((cur - prev) / Math.abs(prev)) * 100);
+  const platformDeltas: Record<string, { spend: number; revenue: number; roas: number; ctr: number }> = {};
+  for (const p of platforms) {
+    const inPlatform = (data?.campaigns ?? []).filter((c: any) =>
+      c.campaign?.platform === p.platform && ["active", "review"].includes(c.campaign?.status)
+    );
+    const prevSpend = inPlatform.reduce((s: number, c: any) => s + (c.prev_metrics?.spend ?? 0), 0);
+    const prevRev   = inPlatform.reduce((s: number, c: any) => s + (c.prev_metrics?.revenue ?? 0), 0);
+    const withPrev  = inPlatform.filter((c: any) => c.prev_metrics);
+    const prevRoas  = prevSpend > 0 ? prevRev / prevSpend : 0;
+    const prevCtr   = withPrev.length > 0
+      ? withPrev.reduce((s: number, c: any) => s + c.prev_metrics.ctr, 0) / withPrev.length : 0;
+    platformDeltas[p.platform] = {
+      spend:   pctDelta(p.spend,   prevSpend),
+      revenue: pctDelta(p.revenue, prevRev),
+      roas:    pctDelta(p.roas,    prevRoas),
+      ctr:     pctDelta(p.ctr,     prevCtr),
+    };
+  }
   const alerts = data?.alerts ?? [];
   const recommendations = data?.recommendations ?? [];
   const forecasts = data?.forecasts ?? [];
@@ -448,14 +488,17 @@ export default function LiveDashboard() {
               <div className="p-5">
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   {[
-                    { l:"Spend",   v:`₹${(p.spend/1000).toFixed(1)}K` },
-                    { l:"Revenue", v:`₹${(p.revenue/1000).toFixed(1)}K` },
-                    { l:"ROAS",    v:`${p.roas?.toFixed(2)}x` },
-                    { l:"CTR",     v:`${p.ctr?.toFixed(1)}%` },
+                    { l:"Spend",   v:`₹${(p.spend/1000).toFixed(1)}K`, d:platformDeltas[p.platform]?.spend },
+                    { l:"Revenue", v:`₹${(p.revenue/1000).toFixed(1)}K`, d:platformDeltas[p.platform]?.revenue },
+                    { l:"ROAS",    v:`${p.roas?.toFixed(2)}x`, d:platformDeltas[p.platform]?.roas },
+                    { l:"CTR",     v:`${p.ctr?.toFixed(1)}%`, d:platformDeltas[p.platform]?.ctr },
                   ].map(m => (
                     <div key={m.l}>
                       <div className="text-[11px] text-outline font-medium uppercase tracking-wide mb-0.5">{m.l}</div>
-                      <div className="text-[15px] font-bold text-on-surface font-mono">{m.v}</div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="text-[15px] font-bold text-on-surface font-mono">{m.v}</div>
+                        <DeltaPill pct={m.d ?? 0} />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -555,6 +598,9 @@ export default function LiveDashboard() {
                 {campaigns.map((c: any, i: number) => {
                   const m = c.metrics;
                   const status = c.campaign.status as Status;
+                  const prevM = c.prev_metrics;
+                  const rowDelta = (curV: number, prevV: number | undefined) =>
+                    (!prevM || !prevV) ? 0 : ((curV - prevV) / Math.abs(prevV)) * 100;
                   return (
                     <tr key={c.campaign.id} className={clsx("border-b border-outline-variant/50 last:border-0 hover:bg-surface-container-low/60 transition-colors")}>
                       <td className="px-4 py-3.5">
@@ -567,12 +613,32 @@ export default function LiveDashboard() {
                         </span>
                       </td>
                       <td className="px-4 py-3.5 text-[13px] font-mono text-on-surface">₹{(c.campaign.budget/1000).toFixed(0)}K</td>
-                      <td className="px-4 py-3.5 text-[13px] font-mono text-on-surface">{m.spend > 0 ? `₹${(m.spend/1000).toFixed(1)}K` : "—"}</td>
-                      <td className="px-4 py-3.5 text-[13px] font-mono text-on-surface">{m.ctr > 0 ? `${m.ctr.toFixed(1)}%` : "—"}</td>
+                      <td className="px-4 py-3.5 text-[13px] font-mono text-on-surface">
+                        {m.spend > 0 ? (
+                          <div className="flex items-center gap-1.5">₹{(m.spend/1000).toFixed(1)}K <DeltaPill pct={rowDelta(m.spend, prevM?.spend)} /></div>
+                        ) : "—"}
+                      </td>
+                      <td className="px-4 py-3.5 text-[13px] font-mono text-on-surface">
+                        {m.ctr > 0 ? (
+                          <div className="flex items-center gap-1.5">{m.ctr.toFixed(1)}% <DeltaPill pct={rowDelta(m.ctr, prevM?.ctr)} /></div>
+                        ) : "—"}
+                      </td>
                       <td className="px-4 py-3.5 text-[13px] font-mono text-on-surface">{m.cpc > 0 ? `₹${m.cpc.toFixed(2)}` : "—"}</td>
-                      <td className="px-4 py-3.5 text-[13px] font-mono text-on-surface">{m.cpa > 0 ? `₹${m.cpa.toFixed(2)}` : "—"}</td>
-                      <td className="px-4 py-3.5 text-[13px] font-mono font-semibold text-[#4F46E5]">{m.roas > 0 ? `${m.roas.toFixed(2)}x` : "—"}</td>
-                      <td className="px-4 py-3.5 text-[13px] font-mono font-semibold text-[#10B981]">{m.revenue > 0 ? `₹${(m.revenue/1000).toFixed(1)}K` : "—"}</td>
+                      <td className="px-4 py-3.5 text-[13px] font-mono text-on-surface">
+                        {m.cpa > 0 ? (
+                          <div className="flex items-center gap-1.5">₹{m.cpa.toFixed(2)} <DeltaPill pct={rowDelta(m.cpa, prevM?.cpa)} inverse /></div>
+                        ) : "—"}
+                      </td>
+                      <td className="px-4 py-3.5 text-[13px] font-mono font-semibold text-[#4F46E5]">
+                        {m.roas > 0 ? (
+                          <div className="flex items-center gap-1.5">{m.roas.toFixed(2)}x <DeltaPill pct={rowDelta(m.roas, prevM?.roas)} /></div>
+                        ) : "—"}
+                      </td>
+                      <td className="px-4 py-3.5 text-[13px] font-mono font-semibold text-[#10B981]">
+                        {m.revenue > 0 ? (
+                          <div className="flex items-center gap-1.5">₹{(m.revenue/1000).toFixed(1)}K <DeltaPill pct={rowDelta(m.revenue, prevM?.revenue)} /></div>
+                        ) : "—"}
+                      </td>
                       <td className="px-4 py-3.5 min-w-[80px]">
                         {c.health.score > 0 ? (
                           <div>
