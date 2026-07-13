@@ -208,7 +208,7 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> Optional[D
     for c in campaigns_list:
         pts = real["history"][c.id]
         raw_current[c.id] = _sum_raw(pts[-days:])
-        raw_prev[c.id]    = _sum_raw(pts[-2 * days:-days] if len(pts) >= 2 * days else [])
+        raw_prev[c.id]    = _sum_raw(pts[-2 * days:-days])
 
     # ── 2. Feature engineering ────────────────────────────────────────────────
     derived_current = {c.id: compute_derived(raw_current[c.id], c.budget) for c in campaigns_list}
@@ -361,7 +361,11 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> Optional[D
     platforms.sort(key=lambda p: p.spend, reverse=True)
 
     # ── 9. Forecasting ────────────────────────────────────────────────────────
-    agg_history = _aggregate_real_history(real["history"], days=days)
+    # Same campaign set as the KPI totals (active/review only) — otherwise the
+    # trend graph includes paused/draft campaigns the KPI tiles above it don't,
+    # and the two visibly disagree.
+    active_history = {c.campaign.id: real["history"][c.campaign.id] for c in active}
+    agg_history = _aggregate_real_history(active_history, days=days)
     forecasts   = build_forecasts(agg_history)
 
     # ── 10. Metadata ──────────────────────────────────────────────────────────
