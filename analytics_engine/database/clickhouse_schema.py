@@ -358,13 +358,17 @@ def read_latest_recommendations(window_seed: int, account_id: str) -> list[dict]
 
 # ─── Real ad-account ingestion (n8n / integrations.meta_ads → /api/ingest) ────
 
-def has_real_campaigns(account_id: str) -> bool:
-    """True once at least one real campaign has been ingested for this specific account."""
+def _has_rows(table: str, account_id: str) -> bool:
     rows = ch_query(
-        "SELECT count() AS cnt FROM nexus.campaigns WHERE account_id = {aid:String}",
+        f"SELECT count() AS cnt FROM {table} WHERE account_id = {{aid:String}}",
         {"aid": account_id},
     )
     return bool(rows) and int(rows[0].get("cnt", 0)) > 0
+
+
+def has_real_campaigns(account_id: str) -> bool:
+    """True once at least one real campaign has been ingested for this specific account."""
+    return _has_rows("nexus.campaigns", account_id)
 
 
 def write_ingested_campaigns(account_id: str, platform: str, campaigns: list[dict]) -> int:
@@ -555,19 +559,11 @@ def read_breakdown_daily_totals(account_id: str, breakdown_type: str = "age", ca
 
 
 def has_real_ads(account_id: str) -> bool:
-    rows = ch_query(
-        "SELECT count() AS cnt FROM nexus.ads WHERE account_id = {aid:String}",
-        {"aid": account_id},
-    )
-    return bool(rows) and int(rows[0].get("cnt", 0)) > 0
+    return _has_rows("nexus.ads", account_id)
 
 
 def has_real_breakdowns(account_id: str) -> bool:
-    rows = ch_query(
-        "SELECT count() AS cnt FROM nexus.audience_breakdowns_daily WHERE account_id = {aid:String}",
-        {"aid": account_id},
-    )
-    return bool(rows) and int(rows[0].get("cnt", 0)) > 0
+    return _has_rows("nexus.audience_breakdowns_daily", account_id)
 
 
 # ─── Real targeted interests (replaces guessed audience affinity) ───────────

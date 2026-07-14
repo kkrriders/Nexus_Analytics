@@ -40,7 +40,11 @@ function RecCard({ rec, index, busy, onApprove, onReject }: {
   const approved = rec.status === "approved";
 
   // Dollar amount first — that's what a non-technical reader actually parses; % is secondary.
+  // revenue_impact_dollars: positive = gain (good). cpa_impact_dollars is the
+  // opposite sign convention: negative = savings (good), positive = added cost (bad).
+  const isCpaImpact = rec.cpa_impact_dollars !== 0 && !rec.revenue_impact_dollars;
   const dollarImpact = rec.revenue_impact_dollars || rec.cpa_impact_dollars || 0;
+  const goodImpact = isCpaImpact ? dollarImpact < 0 : dollarImpact >= 0;
   const uplift = dollarImpact !== 0
     ? `${dollarImpact > 0 ? "+" : "-"}${fmt(Math.abs(dollarImpact), "currency")}`
     : "Optimization";
@@ -56,8 +60,11 @@ function RecCard({ rec, index, busy, onApprove, onReject }: {
           </div>
           <span className={clsx("text-label-caps", style.tagColor)}>{style.tag}</span>
         </div>
-        <span className="flex items-center gap-1 text-label-md text-tertiary bg-tertiary-container/10 px-2 py-0.5 rounded-full">
-          <Icon name="trending_up" className="text-[14px]" />
+        <span className={clsx(
+          "flex items-center gap-1 text-label-md px-2 py-0.5 rounded-full",
+          goodImpact ? "text-tertiary bg-tertiary-container/10" : "text-error bg-error-container/10"
+        )}>
+          <Icon name={goodImpact ? "trending_up" : "trending_down"} className="text-[14px]" />
           {uplift}
         </span>
       </div>

@@ -1,7 +1,9 @@
 export function fmt(value: number, unit: string): string {
   if (unit === "currency") {
-    if (value >= 1_000_000) return `₹${(value / 1_000_000).toFixed(1)}M`;
-    if (value >= 1_000)     return `₹${(value / 1_000).toFixed(1)}K`;
+    const abs = Math.abs(value);
+    const sign = value < 0 ? "-" : "";
+    if (abs >= 1_000_000) return `${sign}₹${(abs / 1_000_000).toFixed(1)}M`;
+    if (abs >= 1_000)     return `${sign}₹${(abs / 1_000).toFixed(1)}K`;
     return `₹${value.toFixed(2)}`;
   }
   if (unit === "multiplier" || unit === "x") return `${value.toFixed(2)}x`;

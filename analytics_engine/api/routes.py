@@ -5,6 +5,7 @@ from collections import defaultdict, deque
 from datetime import date
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from pipeline import run_pipeline, build_audience_data, build_creative_data, build_spend_analytics, _DEVICE_LABELS
 from models.schemas import DashboardData, AudienceData, KeywordData, CreativeData, SpendAnalytics, BudgetOptimizerData
@@ -39,7 +40,9 @@ def _check_chat_rate_limit(user_id: str) -> None:
 
 async def _account_id_for(user: dict) -> str | None:
     """The requesting user's own connected account id, or None if they haven't connected one."""
-    rows = pg_query("SELECT id FROM public.accounts WHERE user_id = %(uid)s", {"uid": user["id"]})
+    rows = await run_in_threadpool(
+        pg_query, "SELECT id FROM public.accounts WHERE user_id = %(uid)s", {"uid": user["id"]}
+    )
     return rows[0]["id"] if rows else None
 
 
@@ -47,8 +50,11 @@ NOT_CONNECTED_DETAIL = "No connected ad account yet — connect one in Settings 
 
 
 async def _require_dashboard(user: dict, days: int = 30) -> DashboardData:
-    """run_pipeline() result, or a 404 — there is no synthetic fallback."""
-    data = run_pipeline(await _account_id_for(user), days=days)
+    """run_pipeline() result, or a 404 — there is no synthetic fallback.
+    Runs in a threadpool: it does blocking ClickHouse reads and, via
+    sync_if_stale(), potentially several sequential Meta Graph API calls —
+    left on the event loop it would stall every other concurrent request."""
+    data = await run_in_threadpool(run_pipeline, await _account_id_for(user), days)
     if data is None:
         raise HTTPException(status_code=404, detail=NOT_CONNECTED_DETAIL)
     return data
@@ -130,7 +136,9 @@ async def get_budget_optimizer(
 async def get_spend_analytics(user: dict = Depends(get_current_user)):
     """All-time spend across every day ever ingested — not bounded by the 7/30/90-day picker."""
     account_id = await _account_id_for(user)
-    data = build_spend_analytics(account_id) if (is_connected() and account_id and has_real_campaigns(account_id)) else None
+    data = await run_in_threadpool(
+        lambda: build_spend_analytics(account_id) if (is_connected() and account_id and has_real_campaigns(account_id)) else None
+    )
     if data is None:
         raise HTTPException(status_code=404, detail="No spend data yet — connect an ad account and sync it in Settings.")
     return data
@@ -143,7 +151,7 @@ async def get_campaign_device_breakdown(campaign_id: str, user: dict = Depends(g
     if not (is_connected() and account_id):
         return {"devices": []}
 
-    rows = read_real_breakdown(account_id, "device_platform", campaign_id=campaign_id)
+    rows = await run_in_threadpool(read_real_breakdown, account_id, "device_platform", campaign_id=campaign_id)
     totals: dict[str, int] = {}
     for r in rows:
         label = _DEVICE_LABELS.get(r["breakdown_value"], str(r["breakdown_value"]).title())
@@ -201,7 +209,9 @@ async def get_forecasts(days: int = Query(30, ge=7, le=90), user: dict = Depends
 async def get_audience(user: dict = Depends(get_current_user)):
     """Real audience demographics/device/geo from ingested ad-account data. No mock fallback — 404 until an account is connected and synced."""
     account_id = await _account_id_for(user)
-    data = build_audience_data(account_id) if (is_connected() and account_id and has_real_breakdowns(account_id)) else None
+    data = await run_in_threadpool(
+        lambda: build_audience_data(account_id) if (is_connected() and account_id and has_real_breakdowns(account_id)) else None
+    )
     if data is None:
         raise HTTPException(status_code=404, detail="No audience data yet — connect an ad account and sync it in Settings.")
     return data
@@ -217,7 +227,9 @@ async def get_keywords(user: dict = Depends(get_current_user)):
 async def get_creatives(user: dict = Depends(get_current_user)):
     """Real per-ad fatigue/CTR from ingested ad-account data. No mock fallback — 404 until an account is connected and synced."""
     account_id = await _account_id_for(user)
-    data = build_creative_data(account_id) if (is_connected() and account_id and has_real_ads(account_id)) else None
+    data = await run_in_threadpool(
+        lambda: build_creative_data(account_id) if (is_connected() and account_id and has_real_ads(account_id)) else None
+    )
     if data is None:
         raise HTTPException(status_code=404, detail="No creative data yet — connect an ad account and sync it in Settings.")
     return data
@@ -282,6 +294,9 @@ async def update_user_role(user_id: str, body: RoleUpdate, admin: dict = Depends
         raise HTTPException(status_code=400, detail="role must be 'admin' or 'member'")
     if user_id == admin["id"] and body.role != "admin":
         raise HTTPException(status_code=400, detail="You cannot change your own admin role")
+
+    if not pg_query("SELECT id FROM public.users WHERE id = %(id)s", {"id": user_id}):
+        raise HTTPException(status_code=404, detail="User not found")
 
     ok = pg_execute("UPDATE public.users SET role = %(role)s, updated_at = now() WHERE id = %(id)s", {"role": body.role, "id": user_id})
     if not ok:

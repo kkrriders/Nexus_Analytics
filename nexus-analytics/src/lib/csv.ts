@@ -2,7 +2,10 @@ export function exportToCsv(filename: string, rows: Record<string, unknown>[]) {
   if (!rows.length) return;
   const headers = Object.keys(rows[0]);
   const escape = (v: unknown) => {
-    const s = v === null || v === undefined ? "" : String(v);
+    let s = v === null || v === undefined ? "" : String(v);
+    // Neutralize formula injection — Excel/Sheets execute a cell starting with
+    // =, +, -, or @ as a formula when the CSV is opened.
+    if (/^[=+\-@]/.test(s)) s = `'${s}`;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [headers.join(","), ...rows.map((r) => headers.map((h) => escape(r[h])).join(","))];

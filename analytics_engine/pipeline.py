@@ -25,7 +25,7 @@ from typing import Optional
 
 from models.schemas import (
     DashboardData, KPISet, KPIChanges, ProcessedCampaign,
-    PlatformSummary, Platform, DerivedMetrics, Recommendation,
+    PlatformSummary, Platform, Recommendation,
     Campaign, CampaignStatus, RawMetrics, CreativeData, AudienceData,
     SpendAnalytics, SpendDayPoint, CampaignSpend, PlatformSpend,
 )
@@ -158,9 +158,6 @@ def _aggregate_real_history(history_map: dict[str, list[dict]], days: int = 30) 
                 spend += p["spend"]; rev += p["revenue"]
                 clicks += p["clicks"]; impr += p["impressions"]; conv += p["conversions"]
 
-        spend = max(spend, 0.01)
-        impr  = max(impr, 1)
-
         try:
             dt_obj = datetime.strptime(d, "%Y-%m-%d")
             label = f"{dt_obj.strftime('%b')} {dt_obj.day}"
@@ -170,7 +167,8 @@ def _aggregate_real_history(history_map: dict[str, list[dict]], days: int = 30) 
         agg.append({
             "date": d, "label": label,
             "spend": round(spend, 2), "revenue": round(rev, 2),
-            "roas": round(rev / spend, 2), "ctr": round(clicks / impr * 100, 2),
+            "roas": round(rev / spend, 2) if spend > 0 else 0,
+            "ctr": round(clicks / impr * 100, 2) if impr > 0 else 0,
             "cpa": round(spend / conv, 2) if conv > 0 else 0, "conversions": round(conv),
             "clicks": round(clicks), "impressions": round(impr),
         })

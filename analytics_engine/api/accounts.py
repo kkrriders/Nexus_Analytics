@@ -8,13 +8,16 @@ Two audiences:
     campaign data back, and refreshes OAuth tokens. Matches the HTTP Request
     nodes in nexus_n8n_workflow.json and nexus_n8n_token_refresh.json.
 """
+import hmac
 import os
 import json
 import logging
+import time
 from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from auth import get_current_user
@@ -26,6 +29,7 @@ from integrations.meta_ads import (
     sync_account, fetch_meta_campaigns, fetch_meta_ads, fetch_ad_creatives,
     fetch_meta_breakdown, fetch_ad_set_targeting, BREAKDOWN_FIELDS,
 )
+from api.admin_integrations import _platform_view
 from notifications import create_notification
 
 logger = logging.getLogger(__name__)
@@ -35,8 +39,27 @@ N8N_SHARED_SECRET = os.getenv("N8N_SHARED_SECRET", "")
 
 
 def require_n8n_secret(x_n8n_secret: str = Header(default="")) -> None:
-    if not N8N_SHARED_SECRET or x_n8n_secret != N8N_SHARED_SECRET:
+    if not N8N_SHARED_SECRET or not hmac.compare_digest(x_n8n_secret, N8N_SHARED_SECRET):
         raise HTTPException(status_code=401, detail="Invalid or missing n8n secret")
+
+
+# Manual "Sync Now" has no staleness gate by design (unlike sync_if_stale's 6h
+# window) — it's meant to let a user force a fresh pull. But with zero limit
+# a user could hammer the Meta Graph API by clicking repeatedly, so cap it to
+# one manual sync per account per cooldown window. In-memory is fine at this
+# scale (single Render instance) — see _CHAT_RATE_LIMIT in routes.py for the
+# same reasoning.
+_SYNC_COOLDOWN_SECONDS = 60.0
+_last_manual_sync: dict[str, float] = {}
+
+
+def _check_sync_cooldown(account_id: str) -> None:
+    now = time.monotonic()
+    last = _last_manual_sync.get(account_id)
+    if last is not None and now - last < _SYNC_COOLDOWN_SECONDS:
+        wait = int(_SYNC_COOLDOWN_SECONDS - (now - last))
+        raise HTTPException(status_code=429, detail=f"Please wait {wait}s before syncing again.")
+    _last_manual_sync[account_id] = now
 
 
 # ── User-facing ───────────────────────────────────────────────────────────
@@ -91,13 +114,20 @@ async def connect_account(body: ConnectAccountBody, user: dict = Depends(get_cur
 
 @router.get("/accounts/me")
 async def get_my_account(user: dict = Depends(get_current_user)):
+    """Never returns raw platform credentials — the frontend only needs
+    connected/sync-status, so tokens are stripped via _platform_view()."""
     rows = pg_query(
         """SELECT id, plan, google_ads, meta_ads, subscription_status,
                   last_synced_at, last_sync_error, created_at
            FROM public.accounts WHERE user_id = %(uid)s""",
         {"uid": user["id"]},
     )
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    row = rows[0]
+    row["google_ads"] = _platform_view(row["google_ads"])
+    row["meta_ads"] = _platform_view(row["meta_ads"])
+    return row
 
 
 @router.post("/accounts/sync")
@@ -106,11 +136,14 @@ async def sync_my_account(user: dict = Depends(get_current_user)):
     Manual 'Sync Now' — fetches fresh Meta ad data directly (no n8n involved)
     so the dashboard doesn't depend on any external service being up.
     """
-    rows = pg_query("SELECT id FROM public.accounts WHERE user_id = %(uid)s", {"uid": user["id"]})
+    rows = await run_in_threadpool(
+        pg_query, "SELECT id FROM public.accounts WHERE user_id = %(uid)s", {"uid": user["id"]}
+    )
     if not rows:
         raise HTTPException(status_code=404, detail="No connected account for this user")
+    _check_sync_cooldown(rows[0]["id"])
     try:
-        return sync_account(rows[0]["id"])
+        return await run_in_threadpool(sync_account, rows[0]["id"])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
@@ -145,7 +178,9 @@ async def meta_snapshot(account_id: str):
     itself from 8 separate Graph API calls, via the fetch_* helpers that
     sync_account() also uses.
     """
-    rows = pg_query("SELECT meta_ads FROM public.accounts WHERE id = %(id)s", {"id": account_id})
+    rows = await run_in_threadpool(
+        pg_query, "SELECT meta_ads FROM public.accounts WHERE id = %(id)s", {"id": account_id}
+    )
     if not rows:
         raise HTTPException(status_code=404, detail="Account not found")
 
@@ -155,7 +190,7 @@ async def meta_snapshot(account_id: str):
     if not token or not ad_account_id:
         raise HTTPException(status_code=400, detail="Account has no Meta ads token/account_id connected")
 
-    try:
+    def _fetch_all():
         campaigns = fetch_meta_campaigns(token, ad_account_id)
         ads = fetch_meta_ads(token, ad_account_id)
         ad_ids = [a["ad_id"] for a in ads if a["ad_id"]]
@@ -164,6 +199,13 @@ async def meta_snapshot(account_id: str):
         for dim in BREAKDOWN_FIELDS:
             breakdowns.extend(fetch_meta_breakdown(token, ad_account_id, dim))
         targeting = fetch_ad_set_targeting(token, ad_account_id)
+        return campaigns, ads, creatives, breakdowns, targeting
+
+    try:
+        # Several sequential Meta Graph API calls (up to 20s timeout each) — a
+        # threadpool so one slow n8n snapshot request doesn't stall every other
+        # concurrent user's dashboard request on the same event loop.
+        campaigns, ads, creatives, breakdowns, targeting = await run_in_threadpool(_fetch_all)
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Meta Graph API request failed: {e}")
 

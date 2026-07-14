@@ -14,13 +14,18 @@ import { exportToCsv } from "@/lib/csv";
 import { fmt } from "@/lib/format";
 import { useAccountConnections } from "@/lib/useAccountConnections";
 
+// Shared with the `d()` KPI-direction helper below: the arrow/color track
+// "improved", not raw sign — `inverse` flips which direction counts as good
+// (e.g. CPA falling is good).
+function isImproved(pct: number, inverse = false): boolean {
+  return (pct >= 0) !== inverse;
+}
+
 // Tiny inline delta pill — same up=good/down=bad language as KpiCard's badge,
 // scaled down to sit next to a metric label inside a denser grid tile.
-// `inverse` flips which direction counts as "good" (e.g. CPA falling is good) —
-// mirrors KpiCard/`d()`'s convention: the arrow/color track "improved", not raw sign.
 function DeltaPill({ pct, inverse = false }: { pct: number; inverse?: boolean }) {
   if (!Number.isFinite(pct) || pct === 0) return null;
-  const good = inverse ? pct < 0 : pct > 0;
+  const good = isImproved(pct, inverse);
   return (
     <span className={clsx(
       "inline-flex items-center gap-0.5 text-[10px] font-bold",
@@ -222,7 +227,7 @@ export default function LiveDashboard() {
 
   // ── KPI cards ─────────────────────────────────────────────────────────────
   type Dir = "up" | "down" | "flat";
-  const d = (n: number, inverse = false): Dir => ((n >= 0) !== inverse) ? "up" : "down";
+  const d = (n: number, inverse = false): Dir => isImproved(n, inverse) ? "up" : "down";
   const KPI_ROWS = [
     { label:"Total Spend",    value:`₹${(kpis?.total_spend/1000).toFixed(1)}K`,  change:`${Math.abs(changes?.spend_change??0).toFixed(1)}%`,        direction:d(changes?.spend_change??0),         icon:"payments",
       tooltip:"Total ad spend across all active campaigns in the selected period." },

@@ -28,6 +28,15 @@ GRAPH_API_VERSION = "v19.0"
 STALE_AFTER = timedelta(hours=6)
 
 
+def _auth_header(access_token: str) -> dict[str, str]:
+    """Bearer header instead of an access_token query param, so the token never
+    lands in a request URL — and therefore never leaks into the URL that
+    httpx bakes into HTTPStatusError messages (which get persisted to
+    last_sync_error and shown to users/admins on the most common failure,
+    an expired token)."""
+    return {"Authorization": f"Bearer {access_token}"}
+
+
 def _extract_conversions(r: dict) -> tuple[int, float]:
     """Sum 'purchase' actions/action_values out of a raw insights row."""
     purchases = [a for a in (r.get("actions") or []) if a.get("action_type") == "purchase"]
@@ -60,9 +69,8 @@ def fetch_meta_campaigns(access_token: str, account_id: str) -> list[dict]:
         "fields": "campaign_id,campaign_name,impressions,clicks,spend,actions,action_values",
         "date_preset": "today",
         "level": "campaign",
-        "access_token": access_token,
     }
-    resp = httpx.get(url, params=params, timeout=20.0)
+    resp = httpx.get(url, params=params, headers=_auth_header(access_token), timeout=20.0)
     resp.raise_for_status()
     data = resp.json().get("data", [])
     return _normalize_meta_campaigns(data)
@@ -93,9 +101,8 @@ def fetch_meta_ads(access_token: str, account_id: str) -> list[dict]:
         "fields": "ad_id,ad_name,campaign_id,campaign_name,impressions,clicks,spend,actions,action_values",
         "date_preset": "today",
         "level": "ad",
-        "access_token": access_token,
     }
-    resp = httpx.get(url, params=params, timeout=20.0)
+    resp = httpx.get(url, params=params, headers=_auth_header(access_token), timeout=20.0)
     resp.raise_for_status()
     data = resp.json().get("data", [])
     return _normalize_meta_ads(data)
@@ -121,11 +128,10 @@ def fetch_meta_breakdown(access_token: str, account_id: str, breakdown: str, cam
         "breakdowns": field,
         "date_preset": "today",
         "level": level,
-        "access_token": access_token,
     }
     if campaign_id:
         params["filtering"] = f'[{{"field":"campaign.id","operator":"EQUAL","value":"{campaign_id}"}}]'
-    resp = httpx.get(url, params=params, timeout=20.0)
+    resp = httpx.get(url, params=params, headers=_auth_header(access_token), timeout=20.0)
     resp.raise_for_status()
     data = resp.json().get("data", [])
 
@@ -154,9 +160,8 @@ def fetch_ad_creatives(access_token: str, ad_ids: list[str]) -> dict[str, dict]:
     params = {
         "ids": ",".join(ad_ids),
         "fields": "creative{title,body,thumbnail_url,object_type}",
-        "access_token": access_token,
     }
-    resp = httpx.get(url, params=params, timeout=20.0)
+    resp = httpx.get(url, params=params, headers=_auth_header(access_token), timeout=20.0)
     resp.raise_for_status()
     data = resp.json()
 
@@ -177,9 +182,8 @@ def fetch_ad_set_targeting(access_token: str, account_id: str) -> list[dict]:
     params = {
         "fields": "id,name,targeting{flexible_spec,interests}",
         "limit": 100,
-        "access_token": access_token,
     }
-    resp = httpx.get(url, params=params, timeout=20.0)
+    resp = httpx.get(url, params=params, headers=_auth_header(access_token), timeout=20.0)
     resp.raise_for_status()
     data = resp.json().get("data", [])
 
