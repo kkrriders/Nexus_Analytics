@@ -452,6 +452,7 @@ def build_creative_data(account_id: str) -> Optional[CreativeData]:
             "campaign": ad["campaign"],
             "type": "video" if is_video else "image",
             "thumb_icon": "videocam" if is_video else "image",
+            "thumbnail_url": ad.get("thumbnail_url", ""),
             "badge_label": badge_label,
             "badge_tone": badge_tone,
             "fatigue_score": fatigue,

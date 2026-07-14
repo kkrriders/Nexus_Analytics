@@ -44,11 +44,23 @@ const DIR_META: Record<MetricDir, { icon: string; tone: string }> = {
 
 function CreativeCard({ creative }: { creative: any }) {
   const isVideo = creative.type === "video";
+  const [imgFailed, setImgFailed] = useState(false);
+  const showImage = creative.thumbnail_url && !imgFailed;
   return (
     <div className="bg-surface-container-lowest rounded-xl border border-outline-variant overflow-hidden flex flex-col shadow-sm hover:shadow-md transition-shadow">
       {/* Thumbnail */}
       <div className="relative h-48 w-full bg-surface-container flex items-center justify-center shrink-0">
-        <Icon name={creative.thumb_icon ?? "image"} className="text-[64px] text-on-surface/15" />
+        {showImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={creative.thumbnail_url}
+            alt={creative.title}
+            className="w-full h-full object-cover"
+            onError={() => setImgFailed(true)}
+          />
+        ) : (
+          <Icon name={creative.thumb_icon ?? "image"} className="text-[64px] text-on-surface/15" />
+        )}
         <div className={clsx("absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded-full text-label-caps shadow-sm", creative.badge_tone)}>
           <span>{creative.badge_label}</span>
         </div>

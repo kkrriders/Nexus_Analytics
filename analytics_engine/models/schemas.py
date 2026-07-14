@@ -351,6 +351,7 @@ class Creative(BaseModel):
     campaign: str
     type: str       # "image" | "video" | "carousel"
     thumb_icon: str
+    thumbnail_url: str = ""
     badge_label: str
     badge_tone: str
     fatigue_score: float
