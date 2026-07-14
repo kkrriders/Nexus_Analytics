@@ -208,7 +208,13 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> Optional[D
     for c in campaigns_list:
         pts = real["history"][c.id]
         raw_current[c.id] = _sum_raw(pts[-days:])
-        raw_prev[c.id]    = _sum_raw(pts[-2 * days:-days])
+        prev_window = pts[-2 * days:-days]
+        if not prev_window and len(pts) >= 2:
+            # Account has less than `days` of history total (e.g. just connected),
+            # so there's no distinct prior window to slice out — fall back to the
+            # oldest half of what exists so KPI deltas aren't stuck at 0.0%.
+            prev_window = pts[:len(pts) // 2]
+        raw_prev[c.id] = _sum_raw(prev_window)
 
     # ── 2. Feature engineering ────────────────────────────────────────────────
     derived_current = {c.id: compute_derived(raw_current[c.id], c.budget) for c in campaigns_list}
