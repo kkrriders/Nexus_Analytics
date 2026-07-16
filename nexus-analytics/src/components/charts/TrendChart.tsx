@@ -10,6 +10,65 @@ type DataPoint = { label: string; [key: string]: number | string };
 
 type TrendConfig = { key: string; color: string; data: DataPoint[] };
 
+type RawHistoryPoint = {
+  date: string; label: string;
+  spend: number; revenue: number; roas: number; ctr: number; cpa: number;
+  conversions: number; clicks: number; impressions: number;
+};
+
+const TIME_FILTERS = ["Daily","Weekly","Monthly","Quarterly"] as const;
+type TimeFilter = typeof TIME_FILTERS[number];
+
+function bucketKey(date: string, time: TimeFilter): string {
+  const d = new Date(date);
+  if (time === "Weekly") {
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    return monday.toISOString().slice(0, 10);
+  }
+  if (time === "Monthly") return `${d.getFullYear()}-${d.getMonth()}`;
+  if (time === "Quarterly") return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3)}`;
+  return date;
+}
+
+function bucketLabel(date: string, time: TimeFilter): string {
+  const d = new Date(date);
+  if (time === "Weekly") {
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    return `${monday.toLocaleDateString("en-US", { month:"short" })} ${monday.getDate()}`;
+  }
+  if (time === "Monthly") return d.toLocaleDateString("en-US", { month:"short", year:"2-digit" });
+  if (time === "Quarterly") return `Q${Math.floor(d.getMonth() / 3) + 1} '${String(d.getFullYear()).slice(2)}`;
+  return date;
+}
+
+// Daily rows get re-bucketed into weeks/months/quarters on request; ratio
+// metrics (ROAS/CTR/CPA) are recomputed from their summed raw components
+// (spend/revenue/clicks/impressions) rather than averaged, since averaging
+// already-divided percentages skews toward low-volume days.
+function bucketHistory(history: RawHistoryPoint[], time: TimeFilter): RawHistoryPoint[] {
+  if (time === "Daily") return history;
+  const buckets = new Map<string, RawHistoryPoint>();
+  for (const p of history) {
+    const key = bucketKey(p.date, time);
+    const existing = buckets.get(key);
+    if (!existing) {
+      buckets.set(key, { ...p, label: bucketLabel(p.date, time) });
+    } else {
+      existing.spend += p.spend; existing.revenue += p.revenue;
+      existing.clicks += p.clicks; existing.impressions += p.impressions;
+      existing.conversions += p.conversions;
+    }
+  }
+  for (const b of buckets.values()) {
+    b.roas = b.spend > 0 ? b.revenue / b.spend : 0;
+    b.ctr = b.impressions > 0 ? (b.clicks / b.impressions) * 100 : 0;
+    b.cpa = b.conversions > 0 ? b.spend / b.conversions : 0;
+  }
+  return [...buckets.values()];
+}
+
 const STATIC_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 function buildStaticData(): Record<string, TrendConfig> {
@@ -23,7 +82,7 @@ function buildStaticData(): Record<string, TrendConfig> {
   };
 }
 
-function buildLiveData(history: DataPoint[]): Record<string, TrendConfig> {
+function buildLiveData(history: RawHistoryPoint[]): Record<string, TrendConfig> {
   return {
     Spend:       { key:"spend",       color:"#2563EB", data:history.map(p=>({label:p.label,value:p.spend})) },
     Revenue:     { key:"revenue",     color:"#10B981", data:history.map(p=>({label:p.label,value:p.revenue})) },
@@ -42,17 +101,17 @@ function fmt(key: string, v: number): string {
   return v.toLocaleString();
 }
 
-const TIME_FILTERS = ["Daily","Weekly","Monthly","Quarterly"] as const;
 const TOOLTIP_STYLE = {
   background:"#fff", border:"1px solid #E2E8F0", borderRadius:"10px",
   fontSize:"13px", boxShadow:"0 4px 16px rgba(15,23,42,0.1)", padding:"10px 14px",
 };
 
-export function TrendChart({ history }: { history?: DataPoint[] }) {
+export function TrendChart({ history }: { history?: RawHistoryPoint[] }) {
   const [activeTrend, setActiveTrend] = useState("Revenue");
-  const [activeTime, setActiveTime] = useState<typeof TIME_FILTERS[number]>("Daily");
+  const [activeTime, setActiveTime] = useState<TimeFilter>("Daily");
 
-  const TREND_DATA = history && history.length > 0 ? buildLiveData(history) : buildStaticData();
+  const hasRealHistory = history && history.length > 0;
+  const TREND_DATA = hasRealHistory ? buildLiveData(bucketHistory(history, activeTime)) : buildStaticData();
   const t = TREND_DATA[activeTrend];
 
   return (
@@ -72,12 +131,16 @@ export function TrendChart({ history }: { history?: DataPoint[] }) {
             {k}
           </button>
         ))}
-        <div className="ml-auto flex items-center gap-1 bg-surface-container rounded-[8px] p-0.5">
+        <div
+          className="ml-auto flex items-center gap-1 bg-surface-container rounded-[8px] p-0.5"
+          title={hasRealHistory ? undefined : "Connect an ad account to group by week/month/quarter"}
+        >
           {TIME_FILTERS.map(tf => (
             <button
               key={tf}
+              disabled={!hasRealHistory}
               onClick={() => setActiveTime(tf)}
-              className={`px-3 py-1 rounded-[6px] text-[12px] font-medium transition-all ${
+              className={`px-3 py-1 rounded-[6px] text-[12px] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                 activeTime === tf ? "bg-surface-bright shadow-sm text-on-surface" : "text-on-surface-variant hover:text-on-surface"
               }`}
             >
