@@ -20,7 +20,7 @@ that calls it surfaces that as "connect an account" (404), never fake data.
 """
 import time
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from models.schemas import (
@@ -132,6 +132,21 @@ def _load_real_campaigns(account_id: str):
     }
 
 
+def _window_by_date(pts: list[dict], start_date: str, end_date: str) -> list[dict]:
+    """Points within [start_date, end_date] inclusive — both 'YYYY-MM-DD' strings."""
+    return [p for p in pts if start_date <= p["date"] <= end_date]
+
+
+def _prev_window_by_date(pts: list[dict], start_date: str, end_date: str) -> list[dict]:
+    """Equal-length window immediately preceding [start_date, end_date] — the
+    custom-range equivalent of the trailing `pts[-2*days:-days]` slice, so KPI
+    deltas still have a comparable prior period to diff against."""
+    span = (datetime.strptime(end_date, "%Y-%m-%d") - datetime.strptime(start_date, "%Y-%m-%d")).days + 1
+    prev_end   = (datetime.strptime(start_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+    prev_start = (datetime.strptime(prev_end,   "%Y-%m-%d") - timedelta(days=span - 1)).strftime("%Y-%m-%d")
+    return _window_by_date(pts, prev_start, prev_end)
+
+
 def _sum_raw(points: list[dict]) -> RawMetrics:
     """Sum a window of daily points into one RawMetrics — powers days-scoped KPI totals."""
     if not points:
@@ -145,10 +160,16 @@ def _sum_raw(points: list[dict]) -> RawMetrics:
     )
 
 
-def _aggregate_real_history(history_map: dict[str, list[dict]], days: int = 30) -> list[dict]:
+def _aggregate_real_history(
+    history_map: dict[str, list[dict]], days: int = 30,
+    start_date: Optional[str] = None, end_date: Optional[str] = None,
+) -> list[dict]:
     """Sum real per-campaign daily history into one aggregated series for forecasting."""
     all_points = [p for points in history_map.values() for p in points]
-    all_dates = sorted({p["date"] for p in all_points})[-days:]
+    if start_date and end_date:
+        all_dates = sorted({p["date"] for p in all_points if start_date <= p["date"] <= end_date})
+    else:
+        all_dates = sorted({p["date"] for p in all_points})[-days:]
 
     agg = []
     for d in all_dates:
@@ -175,7 +196,10 @@ def _aggregate_real_history(history_map: dict[str, list[dict]], days: int = 30) 
     return agg
 
 
-def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> Optional[DashboardData]:
+def run_pipeline(
+    account_id: Optional[str] = None, days: int = 30,
+    start_date: Optional[str] = None, end_date: Optional[str] = None,
+) -> Optional[DashboardData]:
     """
     account_id identifies the requesting user's own connected ad account.
     Returns None when there's no real, synced ad account yet — every caller
@@ -186,7 +210,9 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> Optional[D
 
     `days` bounds how much history feeds the trend charts and each campaign's
     history series (7/30/90 — the TopNav date-range selector), and also bounds
-    the KPI totals themselves, which are summed over that window.
+    the KPI totals themselves, which are summed over that window. Passing
+    `start_date`/`end_date` ('YYYY-MM-DD') instead selects an explicit custom
+    range — the TopNav's "Custom" option — and `days` is ignored.
     """
     if not (is_connected() and account_id):
         return None
@@ -198,21 +224,30 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> Optional[D
 
     window_seed = current_window_seed()
     campaigns_list = real["campaigns"]
+    use_custom_range = start_date is not None and end_date is not None
 
-    # ── 1. Raw metrics summed over the selected `days` window, so totals
-    #      actually change with the date-range picker. ───────────────────────
+    def _window(cid: str) -> list[dict]:
+        pts = real["history"][cid]
+        return _window_by_date(pts, start_date, end_date) if use_custom_range else pts[-days:]
+
+    def _prev_window(cid: str) -> list[dict]:
+        pts = real["history"][cid]
+        prev = _prev_window_by_date(pts, start_date, end_date) if use_custom_range else pts[-2 * days:-days]
+        if not prev and len(pts) >= 2:
+            # Account has less history than the selected window (e.g. just
+            # connected), so there's no distinct prior period to compare against
+            # — fall back to the oldest half of what exists so KPI deltas aren't
+            # stuck at 0.0%.
+            prev = pts[:len(pts) // 2]
+        return prev
+
+    # ── 1. Raw metrics summed over the selected window, so totals actually
+    #      change with the date-range picker. ────────────────────────────────
     raw_current: dict[str, RawMetrics] = {}
     raw_prev: dict[str, RawMetrics] = {}
     for c in campaigns_list:
-        pts = real["history"][c.id]
-        raw_current[c.id] = _sum_raw(pts[-days:])
-        prev_window = pts[-2 * days:-days]
-        if not prev_window and len(pts) >= 2:
-            # Account has less than `days` of history total (e.g. just connected),
-            # so there's no distinct prior window to slice out — fall back to the
-            # oldest half of what exists so KPI deltas aren't stuck at 0.0%.
-            prev_window = pts[:len(pts) // 2]
-        raw_prev[c.id] = _sum_raw(prev_window)
+        raw_current[c.id] = _sum_raw(_window(c.id))
+        raw_prev[c.id] = _sum_raw(_prev_window(c.id))
 
     # ── 2. Feature engineering ────────────────────────────────────────────────
     derived_current = {c.id: compute_derived(raw_current[c.id], c.budget) for c in campaigns_list}
@@ -227,7 +262,7 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> Optional[D
         current = derived_current[cid]
         prev    = derived_prev[cid]
         health  = compute_health(current, campaign.platform)
-        history = real["history"][cid][-days:]
+        history = _window(cid)
         sparkl  = real["sparkline"][cid]
         revenue_series = [pt["revenue"] for pt in history] if history else [0]
         trend  = detect_trend(revenue_series)
@@ -369,7 +404,7 @@ def run_pipeline(account_id: Optional[str] = None, days: int = 30) -> Optional[D
     # trend graph includes paused/draft campaigns the KPI tiles above it don't,
     # and the two visibly disagree.
     active_history = {c.campaign.id: real["history"][c.campaign.id] for c in active}
-    agg_history = _aggregate_real_history(active_history, days=days)
+    agg_history = _aggregate_real_history(active_history, days=days, start_date=start_date, end_date=end_date)
     forecasts   = build_forecasts(agg_history)
 
     # ── 10. Metadata ──────────────────────────────────────────────────────────

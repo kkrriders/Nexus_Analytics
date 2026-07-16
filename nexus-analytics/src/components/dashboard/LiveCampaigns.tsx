@@ -138,7 +138,7 @@ export default function LiveCampaigns() {
 
 function LiveCampaignsInner() {
   const searchParams = useSearchParams();
-  const { days, activePlatforms, togglePlatform, clearPlatformFilter } = useDashboardPrefs();
+  const { range, activePlatforms, togglePlatform, clearPlatformFilter } = useDashboardPrefs();
 
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading]     = useState(true);
@@ -156,14 +156,14 @@ function LiveCampaignsInner() {
     try {
       setLoading(true);
       setError(null);
-      const data = await fetchCampaigns(days);
+      const data = await fetchCampaigns(range);
       setCampaigns(data ?? []);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [days]);
+  }, [range]);
 
   // Don't even hit the API until we know an ad account is connected — avoids
   // firing a request that can only ever 404 for accounts with nothing connected.
@@ -499,7 +499,9 @@ function LiveCampaignsInner() {
 
                 {/* Sparkline mini area chart */}
                 <div className="flex flex-col gap-2">
-                  <p className="text-label-md font-semibold text-on-surface">Revenue Trend ({days} Days)</p>
+                  <p className="text-label-md font-semibold text-on-surface">
+                    Revenue Trend ({"days" in range ? `${range.days} Days` : `${range.start} – ${range.end}`})
+                  </p>
                   <div className="h-40 w-full bg-surface-container-low/30 rounded-lg border border-outline-variant/50 relative overflow-hidden">
                     {selected.sparkline?.length > 1 && (() => {
                       const pts: number[] = selected.sparkline;

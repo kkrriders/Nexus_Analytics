@@ -49,12 +49,27 @@ async def _account_id_for(user: dict) -> str | None:
 NOT_CONNECTED_DETAIL = "No connected ad account yet — connect one in Settings to see your data."
 
 
-async def _require_dashboard(user: dict, days: int = 30) -> DashboardData:
+def _validate_range(start_date: Optional[date], end_date: Optional[date]) -> None:
+    if (start_date is None) != (end_date is None):
+        raise HTTPException(status_code=400, detail="start_date and end_date must both be provided")
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=400, detail="start_date must be on or before end_date")
+
+
+async def _require_dashboard(
+    user: dict, days: int = 30,
+    start_date: Optional[date] = None, end_date: Optional[date] = None,
+) -> DashboardData:
     """run_pipeline() result, or a 404 — there is no synthetic fallback.
     Runs in a threadpool: it does blocking ClickHouse reads and, via
     sync_if_stale(), potentially several sequential Meta Graph API calls —
     left on the event loop it would stall every other concurrent request."""
-    data = await run_in_threadpool(run_pipeline, await _account_id_for(user), days)
+    _validate_range(start_date, end_date)
+    data = await run_in_threadpool(
+        run_pipeline, await _account_id_for(user), days,
+        start_date.isoformat() if start_date else None,
+        end_date.isoformat() if end_date else None,
+    )
     if data is None:
         raise HTTPException(status_code=404, detail=NOT_CONNECTED_DETAIL)
     return data
@@ -86,9 +101,15 @@ def _apply_recommendation_actions(recommendations: list, user_id: str) -> list:
 
 
 @router.get("/dashboard", response_model=DashboardData)
-async def get_dashboard(days: int = Query(30, ge=7, le=90), user: dict = Depends(get_current_user)):
-    """Full dashboard payload — KPIs, campaigns, alerts, recommendations, forecasts."""
-    data = await _require_dashboard(user, days=days)
+async def get_dashboard(
+    days: int = Query(30, ge=7, le=90),
+    start_date: Optional[date] = Query(default=None),
+    end_date: Optional[date] = Query(default=None),
+    user: dict = Depends(get_current_user),
+):
+    """Full dashboard payload — KPIs, campaigns, alerts, recommendations, forecasts.
+    Pass start_date/end_date (both, 'YYYY-MM-DD') for a custom range instead of days."""
+    data = await _require_dashboard(user, days=days, start_date=start_date, end_date=end_date)
     data.recommendations = _apply_recommendation_actions(data.recommendations, user["id"])
 
     for alert in data.alerts:
@@ -101,15 +122,22 @@ async def get_dashboard(days: int = Query(30, ge=7, le=90), user: dict = Depends
 
 
 @router.get("/campaigns")
-async def get_campaigns(days: int = Query(30, ge=7, le=90), user: dict = Depends(get_current_user)):
+async def get_campaigns(
+    days: int = Query(30, ge=7, le=90),
+    start_date: Optional[date] = Query(default=None),
+    end_date: Optional[date] = Query(default=None),
+    user: dict = Depends(get_current_user),
+):
     """Campaign list with metrics, health, and history for Campaign Analytics page."""
-    return (await _require_dashboard(user, days=days)).campaigns
+    return (await _require_dashboard(user, days=days, start_date=start_date, end_date=end_date)).campaigns
 
 
 @router.get("/budget-optimizer", response_model=BudgetOptimizerData)
 async def get_budget_optimizer(
     total_budget: Optional[float] = Query(default=None, gt=0),
     days: int = Query(30, ge=7, le=90),
+    start_date: Optional[date] = Query(default=None),
+    end_date: Optional[date] = Query(default=None),
     user: dict = Depends(get_current_user),
 ):
     """
@@ -117,7 +145,7 @@ async def get_budget_optimizer(
     (real or hypothetical) budget should be split for the best real-ROAS return.
     Uses the same campaigns/metrics as Campaign Analytics — no separate data source.
     """
-    dashboard = await _require_dashboard(user, days=days)
+    dashboard = await _require_dashboard(user, days=days, start_date=start_date, end_date=end_date)
     data = build_budget_optimizer(dashboard.campaigns, total_budget=total_budget)
     if data is None:
         raise HTTPException(status_code=404, detail="No active campaigns to optimize yet.")
@@ -199,9 +227,14 @@ async def act_on_recommendation(body: RecommendationActionBody, user: dict = Dep
 
 
 @router.get("/forecasts")
-async def get_forecasts(days: int = Query(30, ge=7, le=90), user: dict = Depends(get_current_user)):
+async def get_forecasts(
+    days: int = Query(30, ge=7, le=90),
+    start_date: Optional[date] = Query(default=None),
+    end_date: Optional[date] = Query(default=None),
+    user: dict = Depends(get_current_user),
+):
     """Metric forecasts + aggregated trend history (used by Trend Forecasting page)."""
-    data = await _require_dashboard(user, days=days)
+    data = await _require_dashboard(user, days=days, start_date=start_date, end_date=end_date)
     return {"forecasts": data.forecasts, "trend_history": data.trend_history, "kpis": data.kpis}
 
 

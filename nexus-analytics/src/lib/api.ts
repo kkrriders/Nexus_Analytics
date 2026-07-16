@@ -32,11 +32,20 @@ async function postJSON(path: string, body?: unknown, method: 'POST' | 'PUT' = '
   return res.json();
 }
 
-export const fetchDashboard       = (days?: number) => fetchJSON(`/api/dashboard${days ? `?days=${days}` : ''}`);
-export const fetchCampaigns       = (days?: number) => fetchJSON(`/api/campaigns${days ? `?days=${days}` : ''}`);
+// Either a preset trailing window (7/30/90 days) or an explicit custom range
+// picked in the TopNav date picker — both compile down to the same query string.
+export type DateRangeParam = { days: number } | { start: string; end: string };
+
+function rangeQuery(range?: DateRangeParam): string {
+  if (!range) return '';
+  return 'start' in range ? `?start_date=${range.start}&end_date=${range.end}` : `?days=${range.days}`;
+}
+
+export const fetchDashboard       = (range?: DateRangeParam) => fetchJSON(`/api/dashboard${rangeQuery(range)}`);
+export const fetchCampaigns       = (range?: DateRangeParam) => fetchJSON(`/api/campaigns${rangeQuery(range)}`);
 export const fetchCampaignDeviceBreakdown = (campaignId: string) => fetchJSON(`/api/campaigns/${encodeURIComponent(campaignId)}/device-breakdown`);
 export const fetchRecommendations = () => fetchJSON('/api/recommendations');
-export const fetchForecasts       = (days?: number) => fetchJSON(`/api/forecasts${days ? `?days=${days}` : ''}`);
+export const fetchForecasts       = (range?: DateRangeParam) => fetchJSON(`/api/forecasts${rangeQuery(range)}`);
 export const fetchAudience        = () => fetchJSON('/api/audience');
 export const fetchKeywords        = () => fetchJSON('/api/keywords');
 export const fetchCreatives       = () => fetchJSON('/api/creatives');

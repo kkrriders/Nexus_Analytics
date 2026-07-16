@@ -16,20 +16,20 @@ export default function LiveForecasting() {
   const [data, setData]       = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
-  const { days } = useDashboardPrefs();
+  const { range } = useDashboardPrefs();
   const { googleConnected, metaConnected, loading: connLoading } = useAccountConnections();
   const connected = googleConnected || metaConnected;
 
   const load = useCallback(async () => {
     try {
       setLoading(true); setError(null);
-      setData(await fetchForecasts(days));
+      setData(await fetchForecasts(range));
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [days]);
+  }, [range]);
 
   // Don't even hit the API until we know an ad account is connected — avoids
   // firing a request that can only ever 404 for accounts with nothing connected.

@@ -106,7 +106,7 @@ export default function LiveDashboard() {
   const [tableSort, setTableSort] = useState<"spend" | "roas" | "health">("spend");
   const [tableFilterOpen, setTableFilterOpen] = useState(false);
   const tableFilterRef = useRef<HTMLDivElement>(null);
-  const { days, isPlatformActive } = useDashboardPrefs();
+  const { range, isPlatformActive } = useDashboardPrefs();
   const { googleConnected, metaConnected, loading: connLoading } = useAccountConnections();
   const connected = googleConnected || metaConnected;
 
@@ -123,7 +123,7 @@ export default function LiveDashboard() {
     try {
       setLoading(true);
       setError(null);
-      const d = await fetchDashboard(days);
+      const d = await fetchDashboard(range);
       setData(d);
       setCountdown(d.next_update_in_seconds ?? 300);
       setLastUpdated(new Date().toLocaleTimeString());
@@ -132,7 +132,7 @@ export default function LiveDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [days]);
+  }, [range]);
 
   // Don't even hit the API until we know an ad account is connected — avoids
   // firing a request that can only ever 404 for accounts with nothing connected.

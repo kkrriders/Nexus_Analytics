@@ -16,12 +16,15 @@ const PLAN_LABEL: Record<string, string> = { google: "Google Ads", meta: "Meta A
 export function TopNav({ onMenuClick }: TopNavProps) {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
-  const { days, setDays, activePlatforms, togglePlatform, clearPlatformFilter } = useDashboardPrefs();
+  const { days, setDays, customRange, setCustomRange, activePlatforms, togglePlatform, clearPlatformFilter } = useDashboardPrefs();
 
   const [account, setAccount] = useState<{ email: string; fullName: string | null; plan: string | null } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [customStart, setCustomStart] = useState(customRange?.start ?? "");
+  const [customEnd, setCustomEnd] = useState(customRange?.end ?? "");
+  const [customRangeError, setCustomRangeError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const dateRef = useRef<HTMLDivElement>(null);
@@ -65,8 +68,19 @@ export function TopNav({ onMenuClick }: TopNavProps) {
   };
 
   const initial = (account?.fullName ?? account?.email ?? "?").charAt(0).toUpperCase();
-  const dateLabel = DATE_RANGE_OPTIONS.find((o) => o.days === days)?.label ?? "Last 30 Days";
+  const formatRangeDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const dateLabel = customRange
+    ? `${formatRangeDate(customRange.start)} – ${formatRangeDate(customRange.end)}`
+    : DATE_RANGE_OPTIONS.find((o) => o.days === days)?.label ?? "Last 30 Days";
   const filterCount = activePlatforms.size;
+
+  const applyCustomRange = () => {
+    if (!customStart || !customEnd) { setCustomRangeError("Pick both a start and end date"); return; }
+    if (customStart > customEnd) { setCustomRangeError("Start date must be before end date"); return; }
+    setCustomRangeError(null);
+    setCustomRange({ start: customStart, end: customEnd });
+    setDateOpen(false);
+  };
 
   return (
     <header className="bg-surface-bright h-16 fixed top-0 right-0 left-0 md:left-[280px] z-40 flex items-center justify-between px-6 border-b border-outline-variant">
@@ -115,19 +129,48 @@ export function TopNav({ onMenuClick }: TopNavProps) {
             <Icon name="expand_more" className="text-[14px] text-outline" />
           </button>
           {dateOpen && (
-            <div className="absolute right-0 top-10 w-44 bg-surface-bright border border-outline-variant rounded-[10px] shadow-lg py-1.5 z-50">
+            <div className="absolute right-0 top-10 w-64 bg-surface-bright border border-outline-variant rounded-[10px] shadow-lg py-1.5 z-50">
               {DATE_RANGE_OPTIONS.map((opt) => (
                 <button
                   key={opt.days}
                   onClick={() => { setDays(opt.days); setDateOpen(false); }}
                   className={clsx(
                     "w-full text-left px-3 py-2 text-[13px] hover:bg-surface-container-low transition-colors",
-                    opt.days === days ? "text-primary font-medium" : "text-on-surface",
+                    !customRange && opt.days === days ? "text-primary font-medium" : "text-on-surface",
                   )}
                 >
                   {opt.label}
                 </button>
               ))}
+              <div className="border-t border-outline-variant mt-1.5 pt-2.5 px-3 pb-2.5">
+                <p className={clsx("text-[12px] font-medium mb-2", customRange ? "text-primary" : "text-on-surface-variant")}>
+                  Custom Range
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    value={customStart}
+                    max={customEnd || undefined}
+                    onChange={(e) => setCustomStart(e.target.value)}
+                    className="w-full min-w-0 bg-surface-container-low border border-outline-variant rounded-[6px] px-1.5 py-1 text-[12px] text-on-surface"
+                  />
+                  <span className="text-on-surface-variant text-[12px] shrink-0">to</span>
+                  <input
+                    type="date"
+                    value={customEnd}
+                    min={customStart || undefined}
+                    onChange={(e) => setCustomEnd(e.target.value)}
+                    className="w-full min-w-0 bg-surface-container-low border border-outline-variant rounded-[6px] px-1.5 py-1 text-[12px] text-on-surface"
+                  />
+                </div>
+                {customRangeError && <p className="text-[11px] text-error mt-1.5">{customRangeError}</p>}
+                <button
+                  onClick={applyCustomRange}
+                  className="w-full mt-2 bg-primary text-white text-[12px] font-medium py-1.5 rounded-[6px] hover:opacity-90 transition-opacity"
+                >
+                  Apply
+                </button>
+              </div>
             </div>
           )}
         </div>
