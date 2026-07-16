@@ -77,11 +77,21 @@ function buildNarrative(kpis: any, changes: any, best: any, worst: any): string 
   return parts.join(" ");
 }
 
-type Sev = "critical" | "warning" | "info";
-const SEV_STYLE: Record<Sev, { dot: string; badge: string; label: string }> = {
-  critical: { dot: "bg-error",    badge: "bg-[#FEF2F2] text-[#991B1B]", label: "Critical" },
-  warning:  { dot: "bg-warning",  badge: "bg-[#FFFBEB] text-[#92400E]", label: "Warning"  },
-  info:     { dot: "bg-tertiary", badge: "bg-[#ECFDF5] text-[#065F46]", label: "Info"     },
+// Single source of truth for what each metric means — reused by the KPI row,
+// platform cards, campaign table headers, and forecast cards, so an acronym
+// is explained the same way everywhere it appears, not just once at the top.
+const METRIC_TOOLTIPS: Record<string, string> = {
+  spend: "Total ad spend across all active campaigns in the selected period.",
+  revenue: "Total revenue attributed to conversions from these campaigns.",
+  roas: "Return On Ad Spend — revenue earned for every ₹1 spent. 3.0x means ₹3 back per ₹1 spent.",
+  cpa: "Cost Per Acquisition — average amount spent to get one conversion. Lower is better.",
+  ctr: "Click-Through Rate — the % of people who saw an ad and clicked it.",
+  conversions: "Total completed goal actions (purchases, signups, etc.) from these campaigns.",
+  profit: "Revenue minus ad spend — what these campaigns actually made after costs.",
+  health: "A single 0-100 score blending CTR, ROAS, CPA, conversion rate, and budget use against platform benchmarks.",
+  budget: "The planned spend cap set for this campaign.",
+  cpc: "Cost Per Click — average amount spent for a single ad click.",
+  status: "Whether this campaign is currently active, paused, in review, or a draft.",
 };
 
 /* ─── component ───────────────────────────────────────────────────────────── */
@@ -230,21 +240,21 @@ export default function LiveDashboard() {
   const d = (n: number, inverse = false): Dir => isImproved(n, inverse) ? "up" : "down";
   const KPI_ROWS = [
     { label:"Total Spend",    value:`₹${(kpis?.total_spend/1000).toFixed(1)}K`,  change:`${Math.abs(changes?.spend_change??0).toFixed(1)}%`,        direction:d(changes?.spend_change??0),         icon:"payments",
-      tooltip:"Total ad spend across all active campaigns in the selected period." },
+      tooltip:METRIC_TOOLTIPS.spend },
     { label:"Revenue",        value:`₹${(kpis?.total_revenue/1000).toFixed(1)}K`,change:`${Math.abs(changes?.revenue_change??0).toFixed(1)}%`,      direction:d(changes?.revenue_change??0),       icon:"trending_up",
-      tooltip:"Total revenue attributed to conversions from these campaigns." },
+      tooltip:METRIC_TOOLTIPS.revenue },
     { label:"ROAS",           value:`${kpis?.blended_roas?.toFixed(2)}x`,        change:`${Math.abs(changes?.roas_change??0).toFixed(1)}%`,         direction:d(changes?.roas_change??0),          icon:"show_chart",
-      tooltip:"Return On Ad Spend — revenue earned for every ₹1 spent. 3.0x means ₹3 back per ₹1 spent." },
+      tooltip:METRIC_TOOLTIPS.roas },
     { label:"CPA",            value:`₹${kpis?.average_cpa?.toFixed(2)}`,         change:`${Math.abs(changes?.cpa_change??0).toFixed(1)}%`,          direction:d(changes?.cpa_change??0, true),     icon:"target",
-      tooltip:"Cost Per Acquisition — average amount spent to get one conversion. Lower is better." },
+      tooltip:METRIC_TOOLTIPS.cpa },
     { label:"CTR",            value:`${kpis?.average_ctr?.toFixed(2)}%`,         change:`${Math.abs(changes?.ctr_change??0).toFixed(1)}%`,          direction:d(changes?.ctr_change??0),           icon:"ads_click",
-      tooltip:"Click-Through Rate — the % of people who saw an ad and clicked it." },
+      tooltip:METRIC_TOOLTIPS.ctr },
     { label:"Conversions",    value:(kpis?.total_conversions??0).toLocaleString(),change:`${Math.abs(changes?.conversions_change??0).toFixed(1)}%`, direction:d(changes?.conversions_change??0),   icon:"check_circle",
-      tooltip:"Total completed goal actions (purchases, signups, etc.) from these campaigns." },
+      tooltip:METRIC_TOOLTIPS.conversions },
     { label:"Profit",         value:`₹${(kpis?.total_profit/1000).toFixed(1)}K`, change:`${Math.abs(changes?.profit_change??0).toFixed(1)}%`,       direction:d(changes?.profit_change??0),        icon:"account_balance",
-      tooltip:"Revenue minus ad spend — what these campaigns actually made after costs." },
+      tooltip:METRIC_TOOLTIPS.profit },
     { label:"AI Health Score",value:`${kpis?.ai_health_score?.toFixed(0)}/100`,  change:`${Math.abs(changes?.health_score_change??0).toFixed(1)} pts`,direction:d(changes?.health_score_change??0),icon:"psychology",
-      tooltip:"A single 0-100 score blending CTR, ROAS, CPA, conversion rate, and budget use against platform benchmarks." },
+      tooltip:METRIC_TOOLTIPS.health },
   ];
 
   const topRec = recommendations[0];
@@ -371,10 +381,11 @@ export default function LiveDashboard() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-outline-variant">
-              {/* Active alerts */}
-              <div className="p-5 space-y-3">
+              {/* Active alerts — every alert lives here now (was also duplicated
+                  in a separate Alert Center card further down the page). */}
+              <div className="p-5 space-y-3 max-h-[280px] overflow-y-auto custom-scrollbar">
                 <p className="text-[12px] font-bold text-outline uppercase tracking-widest mb-4">Active Alerts</p>
-                {alerts.slice(0, 3).map((a: any) => (
+                {alerts.map((a: any) => (
                   <div key={a.id} className={clsx(
                     "p-3 rounded-[10px] border",
                     a.severity === "critical" ? "bg-[#FEF2F2] border-[#FECACA]" :
@@ -493,13 +504,13 @@ export default function LiveDashboard() {
               <div className="p-5">
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   {[
-                    { l:"Spend",   v:`₹${(p.spend/1000).toFixed(1)}K`, d:platformDeltas[p.platform]?.spend },
-                    { l:"Revenue", v:`₹${(p.revenue/1000).toFixed(1)}K`, d:platformDeltas[p.platform]?.revenue },
-                    { l:"ROAS",    v:`${p.roas?.toFixed(2)}x`, d:platformDeltas[p.platform]?.roas },
-                    { l:"CTR",     v:`${p.ctr?.toFixed(1)}%`, d:platformDeltas[p.platform]?.ctr },
+                    { l:"Spend",   v:`₹${(p.spend/1000).toFixed(1)}K`, d:platformDeltas[p.platform]?.spend, tip:METRIC_TOOLTIPS.spend },
+                    { l:"Revenue", v:`₹${(p.revenue/1000).toFixed(1)}K`, d:platformDeltas[p.platform]?.revenue, tip:METRIC_TOOLTIPS.revenue },
+                    { l:"ROAS",    v:`${p.roas?.toFixed(2)}x`, d:platformDeltas[p.platform]?.roas, tip:METRIC_TOOLTIPS.roas },
+                    { l:"CTR",     v:`${p.ctr?.toFixed(1)}%`, d:platformDeltas[p.platform]?.ctr, tip:METRIC_TOOLTIPS.ctr },
                   ].map(m => (
                     <div key={m.l}>
-                      <div className="text-[11px] text-outline font-medium uppercase tracking-wide mb-0.5">{m.l}</div>
+                      <div title={m.tip} className="text-[11px] text-outline font-medium uppercase tracking-wide mb-0.5 cursor-help w-fit">{m.l}</div>
                       <div className="flex items-center gap-1.5">
                         <div className="text-[15px] font-bold text-on-surface font-mono">{m.v}</div>
                         <DeltaPill pct={m.d ?? 0} />
@@ -530,20 +541,6 @@ export default function LiveDashboard() {
           <Card className="p-6">
             <CardHeader title="Spend by Platform" icon="pie_chart" />
             <SpendDonut platforms={platforms} />
-            <div className="mt-5 pt-4 border-t border-outline-variant/60">
-              <div className="flex justify-between text-[13px]">
-                <span className="text-on-surface-variant">Total Spend</span>
-                <span className="font-bold text-on-surface">₹{(kpis?.total_spend/1000).toFixed(1)}K</span>
-              </div>
-              <div className="flex justify-between text-[13px] mt-1">
-                <span className="text-on-surface-variant">Total Revenue</span>
-                <span className="font-bold text-[#10B981]">₹{(kpis?.total_revenue/1000).toFixed(1)}K</span>
-              </div>
-              <div className="flex justify-between text-[13px] mt-1">
-                <span className="text-on-surface-variant">Blended ROAS</span>
-                <span className="font-bold text-[#4F46E5]">{kpis?.blended_roas?.toFixed(2)}x</span>
-              </div>
-            </div>
           </Card>
         </div>
       </div>
@@ -594,8 +591,15 @@ export default function LiveDashboard() {
             <table className="w-full text-left min-w-[1080px]">
               <thead>
                 <tr className="border-b border-outline-variant bg-surface-container-low/50">
-                  {["Campaign","Platform","Budget","Spend","CTR","CPC","CPA","ROAS","Revenue","Health","Status"].map(h => (
-                    <th key={h} className="px-4 py-3 text-[12px] font-bold text-outline uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  {[
+                    { h:"Campaign" }, { h:"Platform" },
+                    { h:"Budget", tip:METRIC_TOOLTIPS.budget }, { h:"Spend", tip:METRIC_TOOLTIPS.spend },
+                    { h:"CTR", tip:METRIC_TOOLTIPS.ctr }, { h:"CPC", tip:METRIC_TOOLTIPS.cpc },
+                    { h:"CPA", tip:METRIC_TOOLTIPS.cpa }, { h:"ROAS", tip:METRIC_TOOLTIPS.roas },
+                    { h:"Revenue", tip:METRIC_TOOLTIPS.revenue }, { h:"Health", tip:METRIC_TOOLTIPS.health },
+                    { h:"Status", tip:METRIC_TOOLTIPS.status },
+                  ].map(({ h, tip }) => (
+                    <th key={h} title={tip} className={clsx("px-4 py-3 text-[12px] font-bold text-outline uppercase tracking-wide whitespace-nowrap", tip && "cursor-help")}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -681,7 +685,7 @@ export default function LiveDashboard() {
               <div className="w-9 h-9 rounded-[10px] mb-3 flex items-center justify-center bg-primary/10">
                 <Icon name={f.icon} className="text-[18px] text-primary" />
               </div>
-              <div className="text-[11px] font-bold text-outline uppercase tracking-wide mb-2">{f.label}</div>
+              <div title={METRIC_TOOLTIPS[f.metric]} className="text-[11px] font-bold text-outline uppercase tracking-wide mb-2 cursor-help w-fit">{f.label}</div>
               <div className="text-[13px] text-on-surface-variant mb-0.5">
                 Current: <span className="font-semibold text-on-surface font-mono">{fmt(f.current, f.unit)}</span>
               </div>
@@ -698,73 +702,6 @@ export default function LiveDashboard() {
             </Card>
           ))}
         </div>
-      </div>
-
-      {/* ── Sections 7–8: Alerts + Recommendations ────────────────────────── */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-
-        {/* Alert Center */}
-        <Card className="overflow-hidden">
-          <div className="px-6 py-4 border-b border-outline-variant flex items-center justify-between">
-            <h3 className="text-[17px] font-semibold text-on-surface flex items-center gap-2">
-              <Icon name="notifications_active" className="text-[20px] text-error" />
-              Alert Center
-            </h3>
-          </div>
-          <div className="divide-y divide-outline-variant/50">
-            {alerts.length === 0 ? (
-              <div className="px-5 py-6 text-center text-[13px] text-on-surface-variant">
-                No active alerts — all campaigns healthy
-              </div>
-            ) : alerts.map((a: any) => {
-              const s = SEV_STYLE[a.severity as Sev];
-              return (
-                <div key={a.id} className="px-5 py-3.5 flex items-start gap-3 hover:bg-surface-container-low/50 transition-colors">
-                  <span className={clsx("w-2 h-2 rounded-full mt-1.5 shrink-0", s.dot)} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-semibold text-on-surface">{a.campaign_name}</p>
-                    <p className="text-[12px] text-on-surface-variant mt-0.5">{a.message}</p>
-                  </div>
-                  <span className={clsx("text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0", s.badge)}>{s.label}</span>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-
-        {/* Recommendations */}
-        <Card className="overflow-hidden">
-          <div className="px-6 py-4 border-b border-outline-variant flex items-center justify-between">
-            <h3 className="text-[17px] font-semibold text-on-surface flex items-center gap-2">
-              <Icon name="psychology" className="text-[20px] text-ai" />
-              AI Recommendations
-            </h3>
-            <Link href="/ai-recommendations"><Button size="sm">View All</Button></Link>
-          </div>
-          <div className="divide-y divide-outline-variant/50">
-            {recommendations.length === 0 ? (
-              <div className="px-5 py-6 text-center text-[13px] text-on-surface-variant">
-                No recommendations — campaigns are optimised
-              </div>
-            ) : recommendations.slice(0, 4).map((r: any) => (
-              <div key={r.id} className="px-5 py-3.5 flex items-start gap-3 hover:bg-surface-container-low/50 transition-colors">
-                <span className={clsx("text-[10px] font-bold px-2 py-1 rounded-full shrink-0 mt-0.5",
-                  r.priority === "high"   ? "bg-[#FEF2F2] text-[#991B1B]" :
-                  r.priority === "medium" ? "bg-[#FFFBEB] text-[#92400E]" :
-                                             "bg-surface-container text-on-surface-variant"
-                )}>
-                  {r.priority.toUpperCase()}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-semibold text-on-surface">{r.title}</p>
-                  <p className="text-[11px] text-on-surface-variant mt-0.5">{r.campaign_name} · {r.type}</p>
-                </div>
-                <span className="text-[12px] font-bold text-ai shrink-0">{r.confidence}%</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
       </div>
 
     </div>
