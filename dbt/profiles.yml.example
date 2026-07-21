@@ -1,0 +1,20 @@
+# Copy to profiles.yml (gitignored) in this same directory and run dbt with
+# --profiles-dir . , or copy to ~/.dbt/profiles.yml instead.
+#
+# This is a standalone ClickHouse Cloud trial, separate from the one
+# analytics_engine's live app uses — dbt seeds its own small sample dataset
+# (dbt/seeds/*.csv) into it, so it never touches or depends on production data.
+# Sign up for your own free trial at clickhouse.com/cloud and set:
+#   DBT_CLICKHOUSE_HOST / DBT_CLICKHOUSE_USER / DBT_CLICKHOUSE_PASSWORD
+nexus_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: clickhouse
+      schema: nexus
+      host: "{{ env_var('DBT_CLICKHOUSE_HOST') }}"
+      port: 8443
+      user: "{{ env_var('DBT_CLICKHOUSE_USER', 'default') }}"
+      password: "{{ env_var('DBT_CLICKHOUSE_PASSWORD', '') }}"
+      secure: true
+      threads: 2

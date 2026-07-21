@@ -21,7 +21,14 @@ Meta Graph API ──► analytics_engine ──► ClickHouse Cloud (analytics 
 
 nexus-analytics ──► analytics_engine  (Supabase-authenticated REST calls)
 nexus-admin     ──► analytics_engine  (admin-only endpoints)
+
+dbt seeds ──► dbt (own ClickHouse Cloud trial) ──► nexus_staging / nexus_marts
 ```
+
+`dbt/` is a standalone transformation-layer demo: nightly (GitHub Actions)
+`dbt seed && dbt run && dbt test` against its own free ClickHouse Cloud
+trial, mirroring the shape of `analytics_engine`'s real tables without
+touching the production instance or the live dashboard. See `dbt/README.md`.
 
 Both frontends authenticate against the same Supabase project but are fully separate deployments — a customer never sees admin routes, and vice versa, even under a Supabase outage (both apps fail closed to their login page rather than exposing protected content).
 
@@ -55,7 +62,7 @@ Both frontends authenticate against the same Supabase project but are fully sepa
 
 - **Frontend:** Next.js 15, React 19, TypeScript, Tailwind CSS, Recharts
 - **Backend:** FastAPI, Python 3.11, httpx, psycopg2
-- **Data:** ClickHouse Cloud (analytics), Supabase Postgres (accounts/auth)
+- **Data:** ClickHouse Cloud (analytics), Supabase Postgres (accounts/auth), dbt-core (batch transforms/tests over ClickHouse)
 - **AI:** DeepSeek (OpenAI-compatible API) for recommendations and chat
 - **Auth:** Supabase Auth (email/password)
 - **Hosting:** Vercel (both frontends), Render (backend)
@@ -66,6 +73,7 @@ Both frontends authenticate against the same Supabase project but are fully sepa
 nexus-analytics/     Customer-facing Next.js app
 nexus-admin/         Admin console Next.js app
 analytics_engine/    FastAPI backend + data pipeline
+dbt/                 dbt-core project: batch transforms/tests over ClickHouse
 docs/                Design notes and scoping docs for future work
 .github/workflows/   CI/keep-alive automation
 ```

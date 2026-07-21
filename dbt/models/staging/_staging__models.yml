@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: stg_campaigns
+    description: Deduped campaign dimension.
+    columns:
+      - name: campaign_id
+        tests: [not_null]
+
+  - name: stg_campaign_metrics_daily
+    description: Deduped daily campaign metrics fact, one row per (account_id, campaign_id, date).
+    columns:
+      - name: campaign_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_campaigns')
+              field: campaign_id

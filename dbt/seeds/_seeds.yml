@@ -1,0 +1,18 @@
+version: 2
+
+seeds:
+  - name: campaigns
+    description: Small sample campaign dimension, shaped like analytics_engine's nexus.campaigns table.
+    columns:
+      - name: account_id
+        tests: [not_null]
+      - name: id
+        tests: [not_null, unique]
+
+  - name: campaign_metrics_daily
+    description: Small sample daily metrics fact, shaped like analytics_engine's nexus.campaign_metrics_daily table.
+    columns:
+      - name: campaign_id
+        tests: [not_null]
+      - name: date
+        tests: [not_null]

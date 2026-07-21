@@ -1,0 +1,12 @@
+version: 2
+
+models:
+  - name: fct_campaign_daily_performance
+    description: One row per (account_id, campaign_id, date) with derived performance metrics.
+    columns:
+      - name: campaign_id
+        tests: [not_null]
+      - name: date
+        tests: [not_null]
+      - name: roas
+        tests: [not_null]

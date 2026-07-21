@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## Google Ads branch\nStructurally wired (IF checks for google_ads_cred.access_token + customer_id), but the /accounts/connect flow only ever collects a developer_token today — no OAuth access_token/customer_id is stored anywhere yet. So this branch always takes the False path for now.\n\nWire the real GAQL fetch into \"Google Ads Fetch\" once the connect flow + token-refresh piece exists to populate those fields.",
+        "content": "## Google Ads branch\nStructurally wired (IF checks the has_google_token boolean from /accounts/active), but the /accounts/connect flow only ever collects a developer_token today — no OAuth access_token/customer_id is stored anywhere yet. So this branch always takes the False path for now.\n\nWhen wiring the real fetch: follow the Meta pattern (see Scope note) — add a backend endpoint like /api/accounts/{id}/google-snapshot that reads the token server-side and returns only the fetched data, so the token never enters n8n execution data. Do not add a raw google_ads_cred field back onto $json.",
         "height": 260,
         "width": 320
       },
@@ -69,7 +69,7 @@
           "conditions": [
             {
               "id": "cond_meta",
-              "leftValue": "={{ Boolean($json.meta_ads && $json.meta_ads.access_token && $json.meta_ads.account_id) }}",
+              "leftValue": "={{ Boolean($json.has_meta_token) }}",
               "rightValue": true,
               "operator": { "type": "boolean", "operation": "equals" }
             }
@@ -99,7 +99,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const account = $('Split Accounts').item.json;\nconst snapshot = $json;\n\nreturn {\n  json: {\n    account_id: account.account_id,\n    account_name: account.name,\n    google_ads_cred: account.google_ads,\n    meta_ads: {\n      campaigns: snapshot.campaigns || [],\n      ads: snapshot.ads || [],\n      creatives: snapshot.creatives || {},\n      breakdowns: snapshot.breakdowns || [],\n      targeting: snapshot.targeting || [],\n    },\n  },\n};"
+        "jsCode": "const account = $('Split Accounts').item.json;\nconst snapshot = $json;\n\nreturn {\n  json: {\n    account_id: account.account_id,\n    account_name: account.name,\n    has_google_token: account.has_google_token,\n    meta_ads: {\n      campaigns: snapshot.campaigns || [],\n      ads: snapshot.ads || [],\n      creatives: snapshot.creatives || {},\n      breakdowns: snapshot.breakdowns || [],\n      targeting: snapshot.targeting || [],\n    },\n  },\n};"
       },
       "id": "code_assemble_meta",
       "name": "Assemble Meta Platform",
@@ -110,7 +110,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const account = $json;\nreturn {\n  json: {\n    account_id: account.account_id,\n    account_name: account.name,\n    google_ads_cred: account.google_ads,\n    meta_ads: { campaigns: [], ads: [], creatives: {}, breakdowns: [], targeting: [] },\n  },\n};"
+        "jsCode": "const account = $json;\nreturn {\n  json: {\n    account_id: account.account_id,\n    account_name: account.name,\n    has_google_token: account.has_google_token,\n    meta_ads: { campaigns: [], ads: [], creatives: {}, breakdowns: [], targeting: [] },\n  },\n};"
       },
       "id": "code_no_meta",
       "name": "No Meta Data",
@@ -126,7 +126,7 @@
           "conditions": [
             {
               "id": "cond_google",
-              "leftValue": "={{ Boolean($json.google_ads_cred && $json.google_ads_cred.access_token && $json.google_ads_cred.customer_id) }}",
+              "leftValue": "={{ Boolean($json.has_google_token) }}",
               "rightValue": true,
               "operator": { "type": "boolean", "operation": "equals" }
             }

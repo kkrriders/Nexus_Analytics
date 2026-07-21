@@ -162,9 +162,16 @@ async def sync_my_account(user: dict = Depends(get_current_user)):
 
 @router.get("/accounts/active", dependencies=[Depends(require_n8n_secret)])
 async def list_active_accounts():
-    """Accounts for n8n to loop over — data ingestion and token refresh workflows."""
+    """
+    Accounts for n8n to loop over. Returns readiness booleans only, never the
+    raw google_ads/meta_ads credential blobs — those never need to leave the
+    backend, and this way they can't end up sitting in n8n's execution data
+    (saved verbatim on any failed run per saveDataErrorExecution: "all").
+    """
     return pg_query(
-        """SELECT id AS account_id, plan AS name, google_ads, meta_ads
+        """SELECT id AS account_id, plan AS name,
+                  (google_ads->>'access_token' IS NOT NULL AND google_ads->>'customer_id' IS NOT NULL) AS has_google_token,
+                  (meta_ads->>'access_token' IS NOT NULL AND meta_ads->>'account_id' IS NOT NULL) AS has_meta_token
            FROM public.accounts WHERE subscription_status = 'active'"""
     )
 

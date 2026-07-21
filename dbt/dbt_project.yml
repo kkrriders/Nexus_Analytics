@@ -1,0 +1,33 @@
+name: 'nexus_analytics'
+version: '1.0.0'
+config-version: 2
+
+profile: 'nexus_analytics'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  nexus_analytics:
+    staging:
+      +materialized: view
+      +schema: staging
+    marts:
+      +materialized: table
+      +schema: marts
+
+seeds:
+  nexus_analytics:
+    +schema: raw
+    campaigns:
+      +column_types:
+        budget: Float64
+    campaign_metrics_daily:
+      +column_types:
+        date: Date
+        impressions: UInt64
+        clicks: UInt64
+        spend: Float64
+        revenue: Float64
+        conversions: UInt64

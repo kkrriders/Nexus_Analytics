@@ -1,0 +1,4 @@
+account_id,id,name,platform,status,budget,start_date,audience
+demo-account-1,meta_ads_1001,Summer Sale Retargeting,meta_ads,active,1500.00,2026-06-01,Warm audience 25-45
+demo-account-1,meta_ads_1002,New Customer Prospecting,meta_ads,active,2500.00,2026-06-01,Lookalike 1%
+demo-account-1,meta_ads_1003,Holiday Awareness,meta_ads,paused,800.00,2026-06-10,Broad 18-65
